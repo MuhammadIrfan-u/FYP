@@ -8,10 +8,7 @@ import { MobileDrawer } from '@/components/layout/MobileDrawer';
 import { DashboardView } from '@/components/pages/DashboardView';
 import { UploadView } from '@/components/pages/UploadView';
 import { AnalysisView } from '@/components/pages/AnalysisView';
-import { PlayerAnalyticsView } from '@/components/pages/PlayerAnalyticsView';
 import { MatchEventsView } from '@/components/pages/MatchEventsView';
-import { TeamAnalyticsView } from '@/components/pages/TeamAnalyticsView';
-import { TrainingPlansView } from '@/components/pages/TrainingPlansView';
 import { ReportsView } from '@/components/pages/ReportsView';
 import { SettingsView } from '@/components/pages/SettingsView';
 import { CheckCircle2 } from 'lucide-react';
@@ -27,14 +24,8 @@ export const DashboardShell: React.FC = () => {
         return <UploadView />;
       case 'analysis':
         return <AnalysisView />;
-      case 'players':
-        return <PlayerAnalyticsView />;
       case 'events':
         return <MatchEventsView />;
-      case 'team':
-        return <TeamAnalyticsView />;
-      case 'training':
-        return <TrainingPlansView />;
       case 'reports':
         return <ReportsView />;
       case 'settings':

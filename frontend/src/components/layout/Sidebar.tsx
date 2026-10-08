@@ -5,10 +5,7 @@ import {
   LayoutDashboard,
   UploadCloud,
   Cpu,
-  Users,
   Activity,
-  Layers,
-  Dumbbell,
   FileText,
   Settings,
   Sparkles,
@@ -126,28 +123,28 @@ export const Sidebar: React.FC = () => {
         </nav>
       </div>
 
-      {/* AI Coach Card at Sidebar Bottom */}
+      {/* YOLO Vision Status Card at Sidebar Bottom */}
       <div className="p-3 border-t border-[#E8E3D8]">
         <div
-          onClick={() => handleNavClick('training')}
-          className="relative group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#7C3AED]/40 rounded-2xl p-3.5 transition-all duration-200 shadow-sm overflow-hidden"
+          onClick={() => handleNavClick('analysis')}
+          className="relative group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-3.5 transition-all duration-200 shadow-2xs overflow-hidden"
         >
           <div className="flex items-center gap-2 mb-1.5">
-            <div className="p-1.5 rounded-lg bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20">
-              <Sparkles className="w-3.5 h-3.5" />
+            <div className="p-1.5 rounded-lg bg-[#EEEBE3] text-[#242424] border border-[#E8E3D8]">
+              <Cpu className="w-3.5 h-3.5" />
             </div>
             <span className="text-xs font-bold text-[#242424] tracking-wide">
-              AI Coach
+              YOLO Analytics
             </span>
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
           </div>
 
           <p className="text-[11px] text-[#858585] leading-tight line-clamp-2">
-            Get personalised training plans and feedback.
+            Computer vision detection breakdown & tactical feed.
           </p>
 
-          <div className="mt-2.5 pt-2 border-t border-[#E8E3D8] flex items-center justify-between text-[11px] font-semibold text-[#7C3AED] group-hover:text-[#6D28D9]">
-            <span>Open Coach Studio</span>
+          <div className="mt-2.5 pt-2 border-t border-[#E8E3D8] flex items-center justify-between text-[11px] font-semibold text-[#242424] group-hover:text-[#171717]">
+            <span>Open Analysis</span>
             <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
           </div>
         </div>

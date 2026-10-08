@@ -2,10 +2,7 @@ export type PageId =
   | 'dashboard'
   | 'upload'
   | 'analysis'
-  | 'players'
   | 'events'
-  | 'team'
-  | 'training'
   | 'reports'
   | 'settings';
 

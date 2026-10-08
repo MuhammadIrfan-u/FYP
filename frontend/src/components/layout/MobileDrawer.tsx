@@ -5,10 +5,7 @@ import {
   LayoutDashboard,
   UploadCloud,
   Cpu,
-  Users,
   Activity,
-  Layers,
-  Dumbbell,
   FileText,
   Settings,
   X,
@@ -31,10 +28,7 @@ export const MobileDrawer: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'upload', label: 'Upload Video', icon: UploadCloud },
     { id: 'analysis', label: 'Video Analysis', icon: Cpu, badge: 'YOLO' },
-    { id: 'players', label: 'Player Analytics', icon: Users },
     { id: 'events', label: 'Match Events', icon: Activity },
-    { id: 'team', label: 'Team Analytics', icon: Layers },
-    { id: 'training', label: 'Training Plans', icon: Dumbbell, badge: 'AI' },
     { id: 'reports', label: 'Reports', icon: FileText },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -108,17 +102,17 @@ export const MobileDrawer: React.FC = () => {
           </nav>
         </div>
 
-        {/* Bottom AI Box */}
+        {/* Bottom YOLO Box */}
         <div
-          onClick={() => handleNav('training')}
-          className="bg-[#FAF8F4] border border-[#E8E3D8] hover:border-[#7C3AED]/40 rounded-xl p-3 cursor-pointer shadow-sm"
+          onClick={() => handleNav('analysis')}
+          className="bg-[#FAF8F4] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-xl p-3 cursor-pointer shadow-2xs"
         >
           <div className="flex items-center gap-2 text-xs font-bold text-[#242424] mb-1">
-            <Sparkles className="w-3.5 h-3.5 text-[#7C3AED]" />
-            <span>AI Coach Assistant</span>
+            <Cpu className="w-3.5 h-3.5 text-[#242424]" />
+            <span>YOLO Analytics Engine</span>
           </div>
           <p className="text-[10px] text-[#858585]">
-            Get personalised drills and tactical advice.
+            Computer vision detection breakdown & tactical feed.
           </p>
         </div>
       </div>

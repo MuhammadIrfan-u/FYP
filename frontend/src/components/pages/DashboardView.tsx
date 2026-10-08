@@ -7,8 +7,8 @@ import {
   Trophy,
   Clock,
   UploadCloud,
-  Dumbbell,
-  Users,
+  FileText,
+  Activity,
   Cpu,
   ArrowRight,
   Sparkles,
@@ -263,46 +263,46 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
 
-          {/* Card 2: View Training Plans */}
+          {/* Card 2: Video Analysis */}
           <div
-            onClick={() => setActivePage('training')}
+            onClick={() => setActivePage('analysis')}
             className="group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-5 transition-all duration-200 shadow-2xs flex flex-col justify-between"
           >
             <div>
               <div className="w-11 h-11 rounded-xl bg-[#EFEBE1] border border-[#E8E3D8] text-[#242424] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
-                <Dumbbell className="w-5 h-5 text-[#555555]" />
+                <Cpu className="w-5 h-5 text-[#555555]" />
               </div>
               <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
-                View Training Plans
+                Video Analysis
               </h4>
               <p className="text-xs text-[#858585] mt-1">
-                Get personalised drills
+                YOLO detections & tactical pitch
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-[#E8E3D8] flex items-center justify-between text-xs font-semibold text-[#262626]">
-              <span>6 tailored drills ready</span>
+              <span>Inspect active session</span>
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </div>
           </div>
 
-          {/* Card 3: Player Analytics */}
+          {/* Card 3: Match Events */}
           <div
-            onClick={() => setActivePage('players')}
+            onClick={() => setActivePage('events')}
             className="group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-5 transition-all duration-200 shadow-2xs flex flex-col justify-between"
           >
             <div>
               <div className="w-11 h-11 rounded-xl bg-[#EFEBE1] border border-[#E8E3D8] text-[#242424] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
-                <Users className="w-5 h-5 text-[#555555]" />
+                <Activity className="w-5 h-5 text-[#555555]" />
               </div>
               <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
-                Player Analytics
+                Match Events
               </h4>
               <p className="text-xs text-[#858585] mt-1">
-                Track player performance
+                Chronological event logs
               </p>
             </div>
             <div className="mt-5 pt-3 border-t border-[#E8E3D8] flex items-center justify-between text-xs font-semibold text-[#262626]">
-              <span>Inspect Ahmed Khan #10</span>
+              <span>View pass & shot trajectories</span>
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </div>
           </div>
