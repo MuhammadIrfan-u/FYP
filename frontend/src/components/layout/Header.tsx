@@ -45,13 +45,13 @@ export const Header: React.FC = () => {
   ];
 
   return (
-    <header className="sticky top-0 z-30 bg-[#F7F4EE]/90 backdrop-blur-md border-b border-[#E8E3D8] px-4 lg:px-8 py-3.5 flex items-center justify-between transition-all">
+    <header className="sticky top-0 z-30 h-12 bg-[#F7F4EE]/85 backdrop-blur-md border-b border-[#E8E3D8] px-4 lg:px-8 flex items-center justify-between">
       {/* Left: Mobile hamburger menu trigger */}
       <div className="flex items-center gap-3">
         {/* Mobile menu trigger */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="lg:hidden p-2 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] text-[#555555] hover:text-[#242424]"
+          className="lg:hidden p-1.5 rounded-lg bg-[#FAF8F4] border border-[#E8E3D8] text-[#555555] hover:text-[#242424]"
         >
           {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
@@ -60,7 +60,7 @@ export const Header: React.FC = () => {
       {/* Right Side: Search, Notification icon, Coach Profile */}
       <div className="flex items-center gap-3 sm:gap-4">
         {/* Quick Search Jump */}
-        <div className="hidden md:flex items-center bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl px-3 py-1.5 text-xs text-[#858585] focus-within:border-[#262626] transition-colors w-48 lg:w-56 shadow-2xs">
+        <div className="hidden md:flex items-center bg-[#FAF8F4] border border-[#E8E3D8] rounded-lg px-2.5 py-1 text-xs text-[#858585] focus-within:border-[#262626] transition-colors w-48 lg:w-64">
           <Search className="w-3.5 h-3.5 mr-2 text-[#858585]" />
           <input
             type="text"
@@ -73,11 +73,11 @@ export const Header: React.FC = () => {
         <div className="relative">
           <button
             onClick={() => setNotificationsOpen(!notificationsOpen)}
-            className="relative p-2.5 rounded-xl bg-[#FAF8F4] hover:bg-[#EEEBE3] border border-[#E8E3D8] text-[#555555] hover:text-[#242424] transition-all shadow-2xs"
+            className="relative p-1.5 rounded-lg hover:bg-[#EEEBE3] text-[#555555] hover:text-[#242424] transition-colors"
             title="Notifications"
           >
             <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#262626] ring-2 ring-[#FAF8F4]" />
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#DC2626]" />
           </button>
 
           {/* Notifications Dropdown */}
@@ -125,23 +125,15 @@ export const Header: React.FC = () => {
         >
           {/* Coach Avatar */}
           <div className="relative">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#262626] flex items-center justify-center text-white font-bold text-sm shadow-sm border border-[#D9D3C5] group-hover:scale-105 transition-transform">
+            <div className="w-7 h-7 rounded-lg bg-[#262626] flex items-center justify-center text-white font-bold text-[11px] group-hover:scale-105 transition-transform">
               AV
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#16A34A] border-2 border-[#F7F4EE]" />
+            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#16A34A] border-2 border-[#F7F4EE]" />
           </div>
 
-          <div className="text-left hidden sm:block">
-            <div className="text-xs font-bold text-[#242424] group-hover:text-[#171717] transition-colors flex items-center gap-1">
-              {settings.coachName}
-              <ChevronDown className="w-3 h-3 text-[#858585]" />
-            </div>
-            <div className="text-[10px] text-[#858585] font-medium flex items-center gap-1">
-              <span className="px-1 py-0.2 rounded bg-[#EEEBE3] border border-[#D9D3C5] text-[#242424] text-[9px] font-bold">
-                PRO
-              </span>
-              <span>{settings.coachLicense.split('/')[0].trim()}</span>
-            </div>
+          <div className="text-left hidden sm:flex items-center gap-1 text-xs font-semibold text-[#242424]">
+            {settings.coachName}
+            <ChevronDown className="w-3 h-3 text-[#858585]" />
           </div>
         </div>
       </div>
