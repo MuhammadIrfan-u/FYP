@@ -7,27 +7,41 @@ import {
   Trophy,
   Clock,
   UploadCloud,
-  Dumbbell,
-  Users,
+  FileText,
+  Activity,
   Cpu,
   ArrowRight,
-  TrendingUp,
   Sparkles,
   ChevronRight,
-  Eye,
-  Activity,
-  Zap,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { KpiCard } from '@/components/common/KpiCard';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 
 export const DashboardView: React.FC = () => {
-  const { setActivePage, activeVideo, setActiveVideo, videos, players } = useFootball();
+  const { setActivePage, activeVideo } = useFootball();
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
-      {/* 1. KPI CARDS ROW */}
+      {/* 1. PAGE TITLE & OVERVIEW HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
+            Good evening, Coach!
+          </h3>
+          <p className="text-xs sm:text-sm text-[#858585] mt-1">
+            Here&apos;s your team&apos;s performance overview.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="px-3.5 py-1.5 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] text-xs font-semibold text-[#404040] shadow-2xs">
+            Matchday 14 • Season 2024/25
+          </span>
+        </div>
+      </div>
+
+      {/* 2. KPI CARDS ROW */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <KpiCard
           title="Total Sessions"
@@ -71,16 +85,16 @@ export const DashboardView: React.FC = () => {
       </section>
 
       {/* 2. RECENT ANALYSIS MAIN SECTION */}
-      <section className="bg-[#0D1D35] border border-[#1B3554] rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#1B3554]/70">
+      <section className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 sm:p-6 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E8E3D8]">
           <div>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#0B5CFF] animate-pulse" />
-              <h3 className="text-base sm:text-lg font-bold text-[#F8FAFC] tracking-tight uppercase">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#262626]" />
+              <h3 className="text-base sm:text-lg font-bold text-[#242424] tracking-tight uppercase">
                 Recent Analysis
               </h3>
             </div>
-            <p className="text-xs text-[#94A3B8] mt-0.5">
+            <p className="text-xs text-[#858585] mt-0.5">
               Live YOLOv11 Computer Vision detection playback & squad metrics.
             </p>
           </div>
@@ -88,7 +102,7 @@ export const DashboardView: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActivePage('analysis')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-semibold shadow-md shadow-blue-500/20 transition-all"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-semibold shadow-xs transition-all"
             >
               <Cpu className="w-4 h-4" />
               <span>Open Detailed Studio</span>
@@ -112,12 +126,12 @@ export const DashboardView: React.FC = () => {
 
           {/* Key Analysis Metrics Sidebar Beside Video */}
           <div className="xl:col-span-4 flex flex-col gap-4">
-            <div className="bg-[#09162A] border border-[#1B3554] rounded-2xl p-5 shadow-inner">
-              <div className="flex items-center justify-between pb-3 border-b border-[#1B3554]/60">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+            <div className="bg-[#FBFAF7] border border-[#E8E3D8] rounded-2xl p-5 shadow-2xs">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8E3D8]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#858585]">
                   Detection Telemetry
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/30 font-semibold">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/30 font-semibold">
                   Model Conf: 94.2%
                 </span>
               </div>
@@ -125,79 +139,79 @@ export const DashboardView: React.FC = () => {
               {/* Detections & Event Metrics Grid */}
               <div className="grid grid-cols-2 gap-3 mt-4">
                 {/* Players Detected */}
-                <div className="bg-[#0D203B] border border-[#1B3554] rounded-xl p-3 flex flex-col justify-between">
-                  <span className="text-[11px] text-[#94A3B8] font-medium">
+                <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] text-[#858585] font-medium">
                     Players Detected
                   </span>
                   <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-2xl font-black text-[#3B82F6]">
+                    <span className="text-2xl font-black text-[#242424]">
                       {activeVideo.detections.players || 22}
                     </span>
-                    <span className="text-[10px] text-[#64748B]">active</span>
+                    <span className="text-[10px] text-[#858585]">active</span>
                   </div>
                 </div>
 
                 {/* Passes */}
-                <div className="bg-[#0D203B] border border-[#1B3554] rounded-xl p-3 flex flex-col justify-between">
-                  <span className="text-[11px] text-[#94A3B8] font-medium">
+                <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] text-[#858585] font-medium">
                     Passes Detected
                   </span>
                   <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-2xl font-black text-[#22C55E]">
+                    <span className="text-2xl font-black text-[#16A34A]">
                       {activeVideo.metrics.passes || 342}
                     </span>
-                    <span className="text-[10px] text-[#22C55E]/80">84% acc</span>
+                    <span className="text-[10px] text-[#16A34A]">84% acc</span>
                   </div>
                 </div>
 
                 {/* Shots */}
-                <div className="bg-[#0D203B] border border-[#1B3554] rounded-xl p-3 flex flex-col justify-between">
-                  <span className="text-[11px] text-[#94A3B8] font-medium">
+                <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] text-[#858585] font-medium">
                     Shots on Goal
                   </span>
                   <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-2xl font-black text-[#FBBF24]">
+                    <span className="text-2xl font-black text-[#D97706]">
                       {activeVideo.metrics.shots || 14}
                     </span>
-                    <span className="text-[10px] text-[#FBBF24]/80">7 on tgt</span>
+                    <span className="text-[10px] text-[#D97706]">7 on tgt</span>
                   </div>
                 </div>
 
                 {/* Dribbles */}
-                <div className="bg-[#0D203B] border border-[#1B3554] rounded-xl p-3 flex flex-col justify-between">
-                  <span className="text-[11px] text-[#94A3B8] font-medium">
+                <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[11px] text-[#858585] font-medium">
                     Dribbles
                   </span>
                   <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-2xl font-black text-[#8B5CF6]">
+                    <span className="text-2xl font-black text-[#7C3AED]">
                       {activeVideo.metrics.dribbles || 28}
                     </span>
-                    <span className="text-[10px] text-[#8B5CF6]/80">68% succ</span>
+                    <span className="text-[10px] text-[#7C3AED]">68% succ</span>
                   </div>
                 </div>
 
                 {/* Sprints */}
-                <div className="col-span-2 bg-[#0D203B] border border-[#1B3554] rounded-xl p-3 flex items-center justify-between">
+                <div className="col-span-2 bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-3 flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] text-[#94A3B8] font-medium block">
+                    <span className="text-[11px] text-[#858585] font-medium block">
                       High-Velocity Sprints (&gt;25 km/h)
                     </span>
-                    <span className="text-xs text-[#64748B]">
+                    <span className="text-xs text-[#858585]">
                       Top: Marcus Silva #7 (33.2 km/h)
                     </span>
                   </div>
-                  <div className="text-2xl font-black text-[#06B6D4]">
+                  <div className="text-2xl font-black text-[#2563EB]">
                     {activeVideo.metrics.sprints || 64}
                   </div>
                 </div>
               </div>
 
               {/* Quick AI Insight Box */}
-              <div className="mt-4 p-3 rounded-xl bg-gradient-to-r from-[#152239] to-[#0D203B] border border-[#8B5CF6]/30 flex items-start gap-2.5">
-                <Sparkles className="w-4 h-4 text-[#8B5CF6] shrink-0 mt-0.5" />
+              <div className="mt-4 p-3 rounded-xl bg-[#FAF8F4] border border-[#7C3AED]/25 flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-[#7C3AED] shrink-0 mt-0.5" />
                 <div className="text-xs">
-                  <span className="font-bold text-[#F8FAFC]">AI Coach Insight: </span>
-                  <span className="text-[#CBD5E1]">
+                  <span className="font-bold text-[#242424]">AI Coach Insight: </span>
+                  <span className="text-[#404040]">
                     Ahmed Khan completed 52 passes and unlocked 2 key chances. Overloading the left flank created 72% of offensive threat.
                   </span>
                 </div>
@@ -205,14 +219,14 @@ export const DashboardView: React.FC = () => {
             </div>
 
             {/* Match Metadata Pill */}
-            <div className="bg-[#09162A] border border-[#1B3554] rounded-xl p-3 flex items-center justify-between text-xs text-[#94A3B8]">
+            <div className="bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl p-3 flex items-center justify-between text-xs text-[#858585]">
               <div>
-                <span className="text-[#F8FAFC] font-semibold block">{activeVideo.matchName}</span>
-                <span className="text-[11px] text-[#64748B]">{activeVideo.date} • {activeVideo.duration} • {activeVideo.size}</span>
+                <span className="text-[#242424] font-semibold block">{activeVideo.matchName}</span>
+                <span className="text-[11px] text-[#858585]">{activeVideo.date} • {activeVideo.duration} • {activeVideo.size}</span>
               </div>
               <button
                 onClick={() => setActivePage('analysis')}
-                className="px-2.5 py-1 rounded-lg bg-[#0D203B] hover:bg-[#152239] text-[#3B82F6] border border-[#1B3554] font-medium"
+                className="px-2.5 py-1 rounded-lg bg-[#EEEBE3] hover:bg-[#E8E3D8] text-[#242424] border border-[#D9D3C5] font-medium transition-colors"
               >
                 Inspect
               </button>
@@ -223,72 +237,72 @@ export const DashboardView: React.FC = () => {
 
       {/* 3. QUICK ACTIONS ROW */}
       <section className="space-y-4">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+        <h4 className="text-xs font-bold uppercase tracking-wider text-[#858585]">
           Quick Actions
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
           {/* Card 1: Upload Video */}
           <div
             onClick={() => setActivePage('upload')}
-            className="group cursor-pointer bg-[#0D1D35] hover:bg-[#0D203B] border border-[#1B3554] hover:border-[#0B5CFF]/60 rounded-2xl p-5 transition-all duration-200 shadow-lg shadow-black/20 flex flex-col justify-between"
+            className="group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-5 transition-all duration-200 shadow-2xs flex flex-col justify-between"
           >
             <div>
-              <div className="w-11 h-11 rounded-xl bg-[#0B5CFF]/15 border border-[#0B5CFF]/30 text-[#3B82F6] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
-                <UploadCloud className="w-5 h-5" />
+              <div className="w-11 h-11 rounded-xl bg-[#EFEBE1] border border-[#E8E3D8] text-[#242424] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
+                <UploadCloud className="w-5 h-5 text-[#555555]" />
               </div>
-              <h4 className="text-base font-bold text-[#F8FAFC] group-hover:text-[#3B82F6] transition-colors">
+              <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
                 Upload Video
               </h4>
-              <p className="text-xs text-[#94A3B8] mt-1">
+              <p className="text-xs text-[#858585] mt-1">
                 Analyse your next session
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-[#1B3554]/60 flex items-center justify-between text-xs font-semibold text-[#3B82F6]">
+            <div className="mt-5 pt-3 border-t border-[#E8E3D8] flex items-center justify-between text-xs font-semibold text-[#262626]">
               <span>Drop match or training file</span>
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </div>
           </div>
 
-          {/* Card 2: View Training Plans */}
+          {/* Card 2: Video Analysis */}
           <div
-            onClick={() => setActivePage('training')}
-            className="group cursor-pointer bg-[#0D1D35] hover:bg-[#0D203B] border border-[#1B3554] hover:border-[#8B5CF6]/60 rounded-2xl p-5 transition-all duration-200 shadow-lg shadow-black/20 flex flex-col justify-between"
+            onClick={() => setActivePage('analysis')}
+            className="group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-5 transition-all duration-200 shadow-2xs flex flex-col justify-between"
           >
             <div>
-              <div className="w-11 h-11 rounded-xl bg-[#8B5CF6]/15 border border-[#8B5CF6]/30 text-[#8B5CF6] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
-                <Dumbbell className="w-5 h-5" />
+              <div className="w-11 h-11 rounded-xl bg-[#EFEBE1] border border-[#E8E3D8] text-[#242424] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
+                <Cpu className="w-5 h-5 text-[#555555]" />
               </div>
-              <h4 className="text-base font-bold text-[#F8FAFC] group-hover:text-[#8B5CF6] transition-colors">
-                View Training Plans
+              <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
+                Video Analysis
               </h4>
-              <p className="text-xs text-[#94A3B8] mt-1">
-                Get personalised drills
+              <p className="text-xs text-[#858585] mt-1">
+                YOLO detections & tactical pitch
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-[#1B3554]/60 flex items-center justify-between text-xs font-semibold text-[#8B5CF6]">
-              <span>6 tailored drills ready</span>
+            <div className="mt-5 pt-3 border-t border-[#E8E3D8] flex items-center justify-between text-xs font-semibold text-[#262626]">
+              <span>Inspect active session</span>
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </div>
           </div>
 
-          {/* Card 3: Player Analytics */}
+          {/* Card 3: Match Events */}
           <div
-            onClick={() => setActivePage('players')}
-            className="group cursor-pointer bg-[#0D1D35] hover:bg-[#0D203B] border border-[#1B3554] hover:border-[#22C55E]/60 rounded-2xl p-5 transition-all duration-200 shadow-lg shadow-black/20 flex flex-col justify-between"
+            onClick={() => setActivePage('events')}
+            className="group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#D9D3C5] rounded-2xl p-5 transition-all duration-200 shadow-2xs flex flex-col justify-between"
           >
             <div>
-              <div className="w-11 h-11 rounded-xl bg-[#22C55E]/15 border border-[#22C55E]/30 text-[#22C55E] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
-                <Users className="w-5 h-5" />
+              <div className="w-11 h-11 rounded-xl bg-[#EFEBE1] border border-[#E8E3D8] text-[#242424] flex items-center justify-center mb-4 transition-transform group-hover:scale-110">
+                <Activity className="w-5 h-5 text-[#555555]" />
               </div>
-              <h4 className="text-base font-bold text-[#F8FAFC] group-hover:text-[#22C55E] transition-colors">
-                Player Analytics
+              <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
+                Match Events
               </h4>
-              <p className="text-xs text-[#94A3B8] mt-1">
-                Track player performance
+              <p className="text-xs text-[#858585] mt-1">
+                Chronological event logs
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-[#1B3554]/60 flex items-center justify-between text-xs font-semibold text-[#22C55E]">
-              <span>Inspect Ahmed Khan #10</span>
+            <div className="mt-5 pt-3 border-t border-[#E8E3D8] flex items-center justify-between text-xs font-semibold text-[#262626]">
+              <span>View pass & shot trajectories</span>
               <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </div>
           </div>

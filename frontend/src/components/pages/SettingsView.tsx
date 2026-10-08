@@ -44,22 +44,22 @@ export const SettingsView: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* 1. TITLE & SUBTITLE */}
       <div>
-        <h3 className="text-xl sm:text-2xl font-black text-[#F8FAFC] tracking-tight">
+        <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
           Settings
         </h3>
-        <p className="text-xs sm:text-sm text-[#94A3B8] mt-1">
+        <p className="text-xs sm:text-sm text-[#858585] mt-1">
           Configure team parameters, computer vision thresholds, and coaching preferences.
         </p>
       </div>
 
       {/* 2. TAB PILLS */}
-      <div className="flex items-center gap-2 border-b border-[#1B3554]/70 pb-2">
+      <div className="flex items-center gap-2 border-b border-[#E8E3D8] pb-2">
         <button
           onClick={() => setActiveTab('profile')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'profile'
-              ? 'bg-[#0B5CFF] text-white shadow-md shadow-blue-500/25'
-              : 'text-[#94A3B8] hover:bg-[#0D203B] hover:text-[#F8FAFC]'
+              ? 'bg-[#262626] text-white shadow-sm'
+              : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
           }`}
         >
           <Shield className="w-3.5 h-3.5" />
@@ -70,8 +70,8 @@ export const SettingsView: React.FC = () => {
           onClick={() => setActiveTab('players')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'players'
-              ? 'bg-[#0B5CFF] text-white shadow-md shadow-blue-500/25'
-              : 'text-[#94A3B8] hover:bg-[#0D203B] hover:text-[#F8FAFC]'
+              ? 'bg-[#262626] text-white shadow-sm'
+              : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
@@ -82,8 +82,8 @@ export const SettingsView: React.FC = () => {
           onClick={() => setActiveTab('preferences')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'preferences'
-              ? 'bg-[#0B5CFF] text-white shadow-md shadow-blue-500/25'
-              : 'text-[#94A3B8] hover:bg-[#0D203B] hover:text-[#F8FAFC]'
+              ? 'bg-[#262626] text-white shadow-sm'
+              : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
           }`}
         >
           <Sliders className="w-3.5 h-3.5" />
@@ -93,19 +93,19 @@ export const SettingsView: React.FC = () => {
 
       {/* 3. SECTION 1: TEAM PROFILE */}
       {activeTab === 'profile' && (
-        <form onSubmit={handleSave} className="bg-[#0D1D35] border border-[#1B3554] rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-[#1B3554]">
+        <form onSubmit={handleSave} className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-[#E8E3D8]">
             <div>
-              <h4 className="text-base font-bold text-[#F8FAFC]">
+              <h4 className="text-base font-bold text-[#242424]">
                 Team Profile & Tactical Identity
               </h4>
-              <p className="text-xs text-[#94A3B8]">
+              <p className="text-xs text-[#858585]">
                 General details displayed across reports, pitch diagrams, and video telemetry.
               </p>
             </div>
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-500/20"
+              className="px-4 py-2 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Save Changes</span>
@@ -114,61 +114,61 @@ export const SettingsView: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Team Name
               </label>
               <input
                 type="text"
                 value={formData.teamName}
                 onChange={(e) => setFormData({ ...formData, teamName: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Head Coach Name
               </label>
               <input
                 type="text"
                 value={formData.coachName}
                 onChange={(e) => setFormData({ ...formData, coachName: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Coaching License
               </label>
               <input
                 type="text"
                 value={formData.coachLicense}
                 onChange={(e) => setFormData({ ...formData, coachLicense: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Current Season / Competition
               </label>
               <input
                 type="text"
                 value={formData.season}
                 onChange={(e) => setFormData({ ...formData, season: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               />
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Default Formation
               </label>
               <select
                 value={formData.formation}
                 onChange={(e) => setFormData({ ...formData, formation: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               >
                 <option value="4-3-3 Attacking">4-3-3 Attacking</option>
                 <option value="4-2-3-1 Modern">4-2-3-1 Modern</option>
@@ -178,45 +178,45 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Home Stadium
               </label>
               <input
                 type="text"
                 value={formData.stadium}
                 onChange={(e) => setFormData({ ...formData, stadium: e.target.value })}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               />
             </div>
 
             {/* Team Colours */}
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Primary Team Color
               </label>
-              <div className="flex items-center gap-3 bg-[#061122] border border-[#1B3554] rounded-xl p-2 px-3">
+              <div className="flex items-center gap-3 bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl p-2 px-3">
                 <input
                   type="color"
                   value={formData.primaryColor}
                   onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
                   className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-none"
                 />
-                <span className="font-mono text-xs text-[#CBD5E1]">{formData.primaryColor}</span>
+                <span className="font-mono text-xs text-[#242424]">{formData.primaryColor}</span>
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1.5">
+              <label className="text-xs font-bold text-[#404040] block mb-1.5">
                 Secondary Accent Color
               </label>
-              <div className="flex items-center gap-3 bg-[#061122] border border-[#1B3554] rounded-xl p-2 px-3">
+              <div className="flex items-center gap-3 bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl p-2 px-3">
                 <input
                   type="color"
                   value={formData.secondaryColor}
                   onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
                   className="w-8 h-8 rounded-lg bg-transparent cursor-pointer border-none"
                 />
-                <span className="font-mono text-xs text-[#CBD5E1]">{formData.secondaryColor}</span>
+                <span className="font-mono text-xs text-[#242424]">{formData.secondaryColor}</span>
               </div>
             </div>
           </div>
@@ -225,46 +225,46 @@ export const SettingsView: React.FC = () => {
 
       {/* 4. SECTION 2: SQUAD ROSTER */}
       {activeTab === 'players' && (
-        <div className="bg-[#0D1D35] border border-[#1B3554] rounded-2xl p-6 sm:p-8 shadow-xl space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#1B3554]">
+        <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-6 sm:p-8 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#E8E3D8]">
             <div>
-              <h4 className="text-base font-bold text-[#F8FAFC]">
+              <h4 className="text-base font-bold text-[#242424]">
                 Squad Roster & Player Tracking Identifiers
               </h4>
-              <p className="text-xs text-[#94A3B8]">
+              <p className="text-xs text-[#858585]">
                 Registered players recognized by the YOLO computer vision neural model.
               </p>
             </div>
-            <span className="text-xs font-mono text-[#38BDF8]">
+            <span className="text-xs font-mono font-bold text-[#242424]">
               {players.length} Active Profiles
             </span>
           </div>
 
-          <div className="divide-y divide-[#1B3554]/60">
+          <div className="divide-y divide-[#E8E3D8]">
             {players.map((p) => (
-              <div key={p.id} className="py-3.5 flex items-center justify-between hover:bg-[#0D203B] px-3 rounded-xl transition-colors">
+              <div key={p.id} className="py-3.5 flex items-center justify-between hover:bg-[#F7F4EE] px-3 rounded-xl transition-colors">
                 <div className="flex items-center gap-3.5">
-                  <div className="w-9 h-9 rounded-xl bg-[#09162A] border border-[#1B3554] flex items-center justify-center font-mono font-bold text-[#3B82F6] text-xs">
+                  <div className="w-9 h-9 rounded-xl bg-[#EEEBE3] border border-[#E8E3D8] flex items-center justify-center font-mono font-bold text-[#242424] text-xs">
                     #{p.number}
                   </div>
                   <div>
-                    <h5 className="text-xs sm:text-sm font-bold text-[#F8FAFC]">
+                    <h5 className="text-xs sm:text-sm font-bold text-[#242424]">
                       {p.name}
                     </h5>
-                    <span className="text-[11px] text-[#94A3B8] font-medium">
+                    <span className="text-[11px] text-[#858585] font-medium">
                       {p.position} • {p.role}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4 text-xs font-mono">
-                  <span className="text-[#22C55E] font-bold hidden sm:inline">
+                  <span className="text-[#16A34A] font-bold hidden sm:inline">
                     Rating: {p.rating}
                   </span>
-                  <span className="text-[#CBD5E1] hidden sm:inline">
+                  <span className="text-[#404040] hidden sm:inline">
                     {p.distanceCovered}
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-[#22C55E]/15 text-[#22C55E] text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/20 text-[10px] font-bold">
                     ACTIVE
                   </span>
                 </div>
@@ -276,19 +276,19 @@ export const SettingsView: React.FC = () => {
 
       {/* 5. SECTION 3: PREFERENCES & AI VISION SETTINGS */}
       {activeTab === 'preferences' && (
-        <form onSubmit={handleSave} className="bg-[#0D1D35] border border-[#1B3554] rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-[#1B3554]">
+        <form onSubmit={handleSave} className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-[#E8E3D8]">
             <div>
-              <h4 className="text-base font-bold text-[#F8FAFC]">
+              <h4 className="text-base font-bold text-[#242424]">
                 AI & YOLO Computer Vision Settings
               </h4>
-              <p className="text-xs text-[#94A3B8]">
+              <p className="text-xs text-[#858585]">
                 Adjust model inference thresholds, sampling frequency, and automated analytics.
               </p>
             </div>
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-500/20"
+              className="px-4 py-2 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Save Changes</span>
@@ -297,17 +297,17 @@ export const SettingsView: React.FC = () => {
 
           <div className="space-y-6">
             {/* YOLO Threshold */}
-            <div className="p-4 rounded-xl bg-[#061122] border border-[#1B3554] space-y-2">
+            <div className="p-4 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8] space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <div>
-                  <span className="font-bold text-[#F8FAFC] block">
+                  <span className="font-bold text-[#242424] block">
                     Default YOLO Detection Confidence Threshold
                   </span>
-                  <span className="text-[11px] text-[#94A3B8]">
+                  <span className="text-[11px] text-[#858585]">
                     Detections below this score are filtered from bounding box rendering.
                   </span>
                 </div>
-                <span className="font-mono font-bold text-[#3B82F6] text-sm">
+                <span className="font-mono font-bold text-[#242424] text-sm">
                   {formData.yoloThreshold.toFixed(2)}
                 </span>
               </div>
@@ -318,22 +318,22 @@ export const SettingsView: React.FC = () => {
                 step="0.05"
                 value={formData.yoloThreshold}
                 onChange={(e) => setFormData({ ...formData, yoloThreshold: parseFloat(e.target.value) })}
-                className="w-full accent-[#0B5CFF] h-2 bg-[#09162A] rounded-lg cursor-pointer"
+                className="w-full accent-[#262626] h-2 bg-[#EEEBE3] rounded-lg cursor-pointer"
               />
             </div>
 
             {/* Frame Sampling Rate */}
-            <div className="p-4 rounded-xl bg-[#061122] border border-[#1B3554] space-y-2">
+            <div className="p-4 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8] space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <div>
-                  <span className="font-bold text-[#F8FAFC] block">
+                  <span className="font-bold text-[#242424] block">
                     Optical Sampling Frequency (Frames Per Second)
                   </span>
-                  <span className="text-[11px] text-[#94A3B8]">
+                  <span className="text-[11px] text-[#858585]">
                     Higher FPS yields smoother trajectory curves with increased GPU load.
                   </span>
                 </div>
-                <span className="font-mono font-bold text-[#22C55E] text-sm">
+                <span className="font-mono font-bold text-[#16A34A] text-sm">
                   {formData.frameSamplingRate} FPS
                 </span>
               </div>
@@ -343,10 +343,10 @@ export const SettingsView: React.FC = () => {
                     key={rate}
                     type="button"
                     onClick={() => setFormData({ ...formData, frameSamplingRate: rate })}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-colors ${
                       formData.frameSamplingRate === rate
-                        ? 'bg-[#0B5CFF] text-white border-[#0B5CFF]'
-                        : 'bg-[#09162A] text-[#94A3B8] border-[#1B3554]'
+                        ? 'bg-[#262626] text-white border-[#262626]'
+                        : 'bg-[#EEEBE3] text-[#404040] border-[#E8E3D8] hover:bg-[#E8E3D8]'
                     }`}
                   >
                     {rate} FPS
@@ -356,12 +356,12 @@ export const SettingsView: React.FC = () => {
             </div>
 
             {/* Toggle 1: Auto-Detect Heatmaps */}
-            <div className="flex items-center justify-between p-4 rounded-xl bg-[#061122] border border-[#1B3554]">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8]">
               <div>
-                <span className="text-xs font-bold text-[#F8FAFC] block">
+                <span className="text-xs font-bold text-[#242424] block">
                   Auto-Compute Territorial Heatmaps
                 </span>
-                <span className="text-[11px] text-[#94A3B8]">
+                <span className="text-[11px] text-[#858585]">
                   Automatically generate spatial intensity overlays upon video upload.
                 </span>
               </div>
@@ -369,17 +369,17 @@ export const SettingsView: React.FC = () => {
                 type="checkbox"
                 checked={formData.autoDetectHeatmaps}
                 onChange={(e) => setFormData({ ...formData, autoDetectHeatmaps: e.target.checked })}
-                className="w-5 h-5 accent-[#0B5CFF] rounded cursor-pointer"
+                className="w-5 h-5 accent-[#262626] rounded cursor-pointer"
               />
             </div>
 
             {/* Toggle 2: Fatigue Alerts */}
-            <div className="flex items-center justify-between p-4 rounded-xl bg-[#061122] border border-[#1B3554]">
+            <div className="flex items-center justify-between p-4 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8]">
               <div>
-                <span className="text-xs font-bold text-[#F8FAFC] block">
+                <span className="text-xs font-bold text-[#242424] block">
                   High Fatigue / High Sprint Load Notifications
                 </span>
-                <span className="text-[11px] text-[#94A3B8]">
+                <span className="text-[11px] text-[#858585]">
                   Notify coaches when a player exceeds 30 sprints or 9.0 km distance threshold.
                 </span>
               </div>
@@ -387,7 +387,7 @@ export const SettingsView: React.FC = () => {
                 type="checkbox"
                 checked={formData.alertOnHighFatigue}
                 onChange={(e) => setFormData({ ...formData, alertOnHighFatigue: e.target.checked })}
-                className="w-5 h-5 accent-[#0B5CFF] rounded cursor-pointer"
+                className="w-5 h-5 accent-[#262626] rounded cursor-pointer"
               />
             </div>
           </div>

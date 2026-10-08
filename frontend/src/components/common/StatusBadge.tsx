@@ -15,7 +15,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     case 'Ready':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/30 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/30 ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs tracking-wide'
           }`}
         >
@@ -27,7 +27,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     case 'Processing':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#FBBF24]/15 text-[#FBBF24] border border-[#FBBF24]/30 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#D97706]/10 text-[#D97706] border border-[#D97706]/30 ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
           }`}
         >
@@ -39,7 +39,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     case 'Analysing':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#8B5CF6]/15 text-[#8B5CF6] border border-[#8B5CF6]/30 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/30 ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
           }`}
         >
@@ -51,7 +51,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     case 'Uploading':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#0B5CFF]/15 text-[#3B82F6] border border-[#0B5CFF]/30 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#2563EB]/10 text-[#2563EB] border border-[#2563EB]/30 ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
           }`}
         >
@@ -63,7 +63,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     case 'Failed':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#EF4444]/15 text-[#EF4444] border border-[#EF4444]/30 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#DC2626]/10 text-[#DC2626] border border-[#DC2626]/30 ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
           }`}
         >
@@ -75,7 +75,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
     default:
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#1B3554]/50 text-[#CBD5E1] border border-[#1B3554] ${
+          className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-[#EEEBE3] text-[#404040] border border-[#E8E3D8] ${
             isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
           }`}
         >

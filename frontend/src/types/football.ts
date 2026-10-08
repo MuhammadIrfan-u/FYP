@@ -2,10 +2,7 @@ export type PageId =
   | 'dashboard'
   | 'upload'
   | 'analysis'
-  | 'players'
   | 'events'
-  | 'team'
-  | 'training'
   | 'reports'
   | 'settings';
 
@@ -64,6 +61,7 @@ export interface PlayerStats {
   distanceCovered: string;
   topSpeed: string;
   passAccuracy: string;
+  passesCompleted: string;
   successfulDribbles: string;
   shotsOnTarget: string;
   sprints: number;

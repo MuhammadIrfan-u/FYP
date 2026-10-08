@@ -4,48 +4,62 @@
 
 @layer base {
   :root {
-    --bg-dark: #020E1D;
-    --bg-secondary: #061122;
-    --bg-sidebar: #09162A;
-    --bg-card: #0D1D35;
-    --bg-card-hover: #0D203B;
-    --bg-card-elevated: #152239;
-    --border-main: #1B3554;
-    --border-subtle: #284255;
-    --blue-primary: #0B5CFF;
-    --blue-hover: #1677FF;
-    --blue-light: #3B82F6;
-    --text-primary: #F8FAFC;
-    --text-secondary: #CBD5E1;
-    --text-muted: #94A3B8;
-    --text-dim: #64748B;
+    /* Main backgrounds */
+    --bg-page: #F7F4EE;
+    --bg-sidebar: #F9F7F2;
+    --bg-card: #FAF8F4;
+    --bg-card-inner: #FBFAF7;
+    --bg-soft: #EEEBE3;
+    --bg-icon: #EFEBE1;
+
+    /* Borders */
+    --border: #E8E3D8;
+    --border-strong: #D9D3C5;
+
+    /* Brand */
+    --brand: #262626;
+    --brand-hover: #171717;
+    --accent: #262626;
+
+    /* Text */
+    --text-heading: #242424;
+    --text-body: #404040;
+    --text-muted: #858585;
+    --icon: #555555;
+
+    /* Semantic colours */
+    --success: #16A34A;
+    --warning: #D97706;
+    --error: #DC2626;
+    --info: #2563EB;
+    --ai: #7C3AED;
   }
 
   body {
-    background-color: #020E1D;
-    color: #F8FAFC;
+    background-color: #F7F4EE;
+    color: #404040;
     font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overflow-x: hidden;
   }
 }
 
-/* Custom scrollbars for dark sports-tech feel */
+/* Custom scrollbars for clean light sports-tech feel */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #061122;
+  background: #F7F4EE;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1B3554;
+  background: #D9D3C5;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #284255;
+  background: #858585;
 }
 
-/* Radar pulse animation for YOLO scanning */
+/* Subtle radar pulse animation for scanning */
 @keyframes radar-sweep {
   0% {
     transform: rotate(0deg);

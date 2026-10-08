@@ -52,17 +52,17 @@ export const ReportsView: React.FC = () => {
       {/* 1. TITLE & GENERATE REPORT BUTTON */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl sm:text-2xl font-black text-[#F8FAFC] tracking-tight">
+          <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
             Reports
           </h3>
-          <p className="text-xs sm:text-sm text-[#94A3B8] mt-1">
+          <p className="text-xs sm:text-sm text-[#858585] mt-1">
             Export comprehensive PDF/CSV analytics reports for coaches and stakeholders.
           </p>
         </div>
 
         <button
           onClick={() => setGenerateModalOpen(true)}
-          className="px-4 py-2.5 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center gap-2 self-start sm:self-auto"
+          className="px-4 py-2.5 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-bold shadow-sm transition-all flex items-center gap-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Generate Report</span>
@@ -77,8 +77,8 @@ export const ReportsView: React.FC = () => {
             onClick={() => setActiveTab(tab)}
             className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
               activeTab === tab
-                ? 'bg-[#0B5CFF] text-white shadow-md shadow-blue-500/25'
-                : 'bg-[#0D1D35] hover:bg-[#0D203B] text-[#94A3B8] border border-[#1B3554]'
+                ? 'bg-[#262626] text-white shadow-sm'
+                : 'bg-[#FBFAF7] hover:bg-[#EEEBE3] text-[#404040] border border-[#E8E3D8]'
             }`}
           >
             {tab === 'All' ? 'All Reports' : tab === 'Match' ? 'Match Reports' : tab === 'Player' ? 'Player Reports' : 'Team Reports'}
@@ -87,43 +87,43 @@ export const ReportsView: React.FC = () => {
       </div>
 
       {/* 3. REPORTS LIST / TABLE */}
-      <div className="bg-[#0D1D35] border border-[#1B3554] rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-[#1B3554]">
-          <span className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+      <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#E8E3D8]">
+          <span className="text-xs font-bold uppercase tracking-wider text-[#858585]">
             Generated Dossiers ({filteredReports.length})
           </span>
-          <span className="text-[11px] text-[#64748B] font-mono">
+          <span className="text-[11px] text-[#858585] font-mono">
             Automated Computer Vision Dossiers
           </span>
         </div>
 
-        <div className="divide-y divide-[#1B3554]/60">
+        <div className="divide-y divide-[#E8E3D8]">
           {filteredReports.map((rep) => (
             <div
               key={rep.id}
-              className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#0D203B] p-3 rounded-xl transition-colors"
+              className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[#F7F4EE] p-3 rounded-xl transition-colors"
             >
               {/* Report Info */}
               <div className="flex items-start sm:items-center gap-3.5">
-                <div className="p-3 rounded-xl bg-[#09162A] border border-[#1B3554] text-[#3B82F6] shrink-0">
+                <div className="p-3 rounded-xl bg-[#EEEBE3] border border-[#E8E3D8] text-[#242424] shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2">
-                    <h4 className="text-xs sm:text-sm font-bold text-[#F8FAFC]">
+                    <h4 className="text-xs sm:text-sm font-bold text-[#242424]">
                       {rep.title}
                     </h4>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#09162A] text-[#CBD5E1] border border-[#1B3554]">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#EEEBE3] text-[#404040] border border-[#E8E3D8]">
                       {rep.type}
                     </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-[#94A3B8]">
+                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-[#858585]">
                     <span>{rep.match}</span>
                     <span>•</span>
                     <span>{rep.date}</span>
                     <span>•</span>
-                    <span className="font-mono text-[#38BDF8]">{rep.fileSize}</span>
+                    <span className="font-mono text-[#242424] font-semibold">{rep.fileSize}</span>
                   </div>
                 </div>
               </div>
@@ -135,7 +135,7 @@ export const ReportsView: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setViewReportModal(rep)}
-                    className="px-3 py-1.5 rounded-lg bg-[#09162A] hover:bg-[#152239] border border-[#1B3554] text-xs font-semibold text-[#CBD5E1] hover:text-white flex items-center gap-1.5 transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-[#FBFAF7] hover:bg-[#EEEBE3] border border-[#E8E3D8] text-xs font-semibold text-[#404040] hover:text-[#242424] flex items-center gap-1.5 transition-colors"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>View</span>
@@ -143,7 +143,7 @@ export const ReportsView: React.FC = () => {
 
                   <button
                     onClick={() => handleExport(rep)}
-                    className="px-3 py-1.5 rounded-lg bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/20"
+                    className="px-3 py-1.5 rounded-lg bg-[#262626] hover:bg-[#171717] text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Export</span>
@@ -164,7 +164,7 @@ export const ReportsView: React.FC = () => {
       >
         <form onSubmit={handleCreateReport} className="space-y-4">
           <div>
-            <label className="text-xs font-bold text-[#CBD5E1] block mb-1">
+            <label className="text-xs font-bold text-[#404040] block mb-1">
               Report Title
             </label>
             <input
@@ -172,19 +172,19 @@ export const ReportsView: React.FC = () => {
               value={reportTitle}
               onChange={(e) => setReportTitle(e.target.value)}
               placeholder="e.g. Matchday 14 Final Tactical Dossier"
-              className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-3.5 py-2 text-xs text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:border-[#0B5CFF]"
+              className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-3.5 py-2 text-xs text-[#242424] placeholder-[#858585] focus:outline-none focus:border-[#262626]"
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1">
+              <label className="text-xs font-bold text-[#404040] block mb-1">
                 Report Type
               </label>
               <select
                 value={reportType}
                 onChange={(e) => setReportType(e.target.value as any)}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-3.5 py-2 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-3.5 py-2 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               >
                 <option value="Match Report">Match Report</option>
                 <option value="Player Report">Player Report</option>
@@ -193,13 +193,13 @@ export const ReportsView: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-[#CBD5E1] block mb-1">
+              <label className="text-xs font-bold text-[#404040] block mb-1">
                 Target Match / Session
               </label>
               <select
                 value={reportMatch}
                 onChange={(e) => setReportMatch(e.target.value)}
-                className="w-full bg-[#061122] border border-[#1B3554] rounded-xl px-3.5 py-2 text-xs text-[#F8FAFC] focus:outline-none focus:border-[#0B5CFF]"
+                className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-3.5 py-2 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               >
                 <option value="FC Dynamo vs Rapid Stars">FC Dynamo vs Rapid Stars</option>
                 <option value="Midfield Transition & Pressing Drill">Midfield Transition & Pressing Drill</option>
@@ -208,8 +208,8 @@ export const ReportsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-[#061122] border border-[#1B3554] text-xs text-[#94A3B8] space-y-1">
-            <span className="font-bold text-white block">Included in compilation:</span>
+          <div className="p-3 rounded-xl bg-[#EEEBE3] border border-[#E8E3D8] text-xs text-[#404040] space-y-1">
+            <span className="font-bold text-[#242424] block">Included in compilation:</span>
             <p>• Full YOLO object detections (Players, Ball, Goals, Referee)</p>
             <p>• Passing matrix and tactical positioning pitch visual</p>
             <p>• Player load, sprint counts, and AI coaching recommendations</p>
@@ -219,13 +219,13 @@ export const ReportsView: React.FC = () => {
             <button
               type="button"
               onClick={() => setGenerateModalOpen(false)}
-              className="px-4 py-2 rounded-xl bg-[#0D203B] text-xs text-[#CBD5E1] border border-[#1B3554]"
+              className="px-4 py-2 rounded-xl bg-[#FBFAF7] text-xs text-[#404040] border border-[#E8E3D8] hover:bg-[#EEEBE3]"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-bold shadow-md shadow-blue-500/20"
+              className="px-5 py-2 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-bold shadow-sm"
             >
               Compile & Generate
             </button>
@@ -243,26 +243,26 @@ export const ReportsView: React.FC = () => {
       >
         {viewReportModal && (
           <div className="space-y-5">
-            <div className="p-4 rounded-xl bg-[#061122] border border-[#1B3554] text-xs text-[#CBD5E1] leading-relaxed">
-              <strong className="text-white block mb-1">Executive Summary:</strong>
+            <div className="p-4 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8] text-xs text-[#404040] leading-relaxed">
+              <strong className="text-[#242424] block mb-1">Executive Summary:</strong>
               {viewReportModal.summary}
             </div>
 
             {/* Key Metrics Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {viewReportModal.keyMetrics.map((km, idx) => (
-                <div key={idx} className="bg-[#061122] border border-[#1B3554] rounded-xl p-3 text-center">
-                  <span className="text-[10px] text-[#94A3B8] uppercase block">{km.label}</span>
-                  <span className="text-base font-bold text-[#38BDF8] mt-0.5 block">{km.value}</span>
+                <div key={idx} className="bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl p-3 text-center">
+                  <span className="text-[10px] text-[#858585] uppercase block">{km.label}</span>
+                  <span className="text-base font-bold text-[#242424] mt-0.5 block">{km.value}</span>
                 </div>
               ))}
             </div>
 
             {/* Simulated Report Document Sheet */}
-            <div className="p-5 rounded-2xl bg-[#020E1D] border border-[#1B3554] space-y-3 font-mono text-xs text-[#94A3B8]">
-              <div className="flex justify-between border-b border-[#1B3554] pb-2 text-[11px] text-white font-bold">
+            <div className="p-5 rounded-2xl bg-[#EEEBE3] border border-[#E8E3D8] space-y-3 font-mono text-xs text-[#404040]">
+              <div className="flex justify-between border-b border-[#D9D3C5] pb-2 text-[11px] text-[#242424] font-bold">
                 <span>DOCUMENT DOSSIER REF: #{viewReportModal.id}</span>
-                <span className="text-[#22C55E]">STATUS: VERIFIED</span>
+                <span className="text-[#16A34A]">STATUS: VERIFIED</span>
               </div>
               <p>• Model Architecture: YOLOv11x Custom Sports Weights</p>
               <p>• Optical Flow & Kalman Filter Tracking: Active</p>
@@ -271,11 +271,11 @@ export const ReportsView: React.FC = () => {
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <span className="text-xs text-[#64748B] font-mono">{viewReportModal.fileSize}</span>
+              <span className="text-xs text-[#858585] font-mono">{viewReportModal.fileSize}</span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setViewReportModal(null)}
-                  className="px-4 py-2 rounded-xl bg-[#0D203B] border border-[#1B3554] text-xs text-[#CBD5E1]"
+                  className="px-4 py-2 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8] text-xs text-[#404040] hover:bg-[#EEEBE3]"
                 >
                   Close
                 </button>
@@ -284,7 +284,7 @@ export const ReportsView: React.FC = () => {
                     handleExport(viewReportModal);
                     setViewReportModal(null);
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#0B5CFF] text-white text-xs font-bold flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-xl bg-[#262626] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Download PDF</span>
