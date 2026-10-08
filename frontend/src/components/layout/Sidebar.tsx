@@ -31,10 +31,9 @@ export const Sidebar: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'upload', label: 'Upload Video', icon: UploadCloud },
     { id: 'analysis', label: 'Video Analysis', icon: Cpu, badge: 'YOLO' },
-    { id: 'players', label: 'Player Analytics', icon: Users },
+
     { id: 'events', label: 'Match Events', icon: Activity },
-    { id: 'team', label: 'Team Analytics', icon: Layers },
-    { id: 'training', label: 'Training Plans', icon: Dumbbell, badge: 'AI' },
+
     { id: 'reports', label: 'Reports', icon: FileText },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -94,32 +93,29 @@ export const Sidebar: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 group ${
-                  isActive
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 group ${isActive
                     ? 'bg-[#262626] text-[#FFFFFF] shadow-sm font-semibold'
                     : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-3">
                   <Icon
-                    className={`w-4 h-4 transition-colors ${
-                      isActive
+                    className={`w-4 h-4 transition-colors ${isActive
                         ? 'text-white'
                         : 'text-[#555555] group-hover:text-[#242424]'
-                    }`}
+                      }`}
                   />
                   <span>{item.label}</span>
                 </div>
 
                 {item.badge && (
                   <span
-                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${
-                      isActive
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${isActive
                         ? 'bg-white/20 text-white'
                         : item.badge === 'AI'
-                        ? 'bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20'
-                        : 'bg-[#EEEBE3] text-[#404040] border border-[#D9D3C5]'
-                    }`}
+                          ? 'bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20'
+                          : 'bg-[#EEEBE3] text-[#404040] border border-[#D9D3C5]'
+                      }`}
                   >
                     {item.badge}
                   </span>
