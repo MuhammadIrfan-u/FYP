@@ -19,30 +19,73 @@ import { KpiCard } from '@/components/common/KpiCard';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 
 export const DashboardView: React.FC = () => {
-  const { setActivePage, activeVideo } = useFootball();
+  const { setActivePage, activeVideo, settings } = useFootball();
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+  const SectionDivider = ({ label }: { label: string }) => (
+    <div className="flex items-center gap-4 -mb-6">
+      <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
+        {label}
+      </span>
+      <div className="flex-1 h-px bg-gradient-to-r from-[#D9D3C5] via-[#E8E3D8] to-transparent" />
+    </div>
+  );
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-200">
-      {/* 1. PAGE TITLE & OVERVIEW HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
-            Good evening, Coach!
-          </h3>
-          <p className="text-xs sm:text-sm text-[#858585] mt-1">
-            Here&apos;s your team&apos;s performance overview.
-          </p>
-        </div>
+    <div className="space-y-12 animate-in fade-in duration-200">
+      {/* 1. HERO BANNER */}
+      <section className="relative overflow-hidden rounded-2xl border border-[#E8E3D8] min-h-[300px] sm:min-h-[340px] flex items-end">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/hero_section_image.jpg"
+          alt="Football analytics stadium"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        {/* Blend into cream palette */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#F7F4EE]/80 via-[#F7F4EE]/35 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#F7F4EE]/70 to-transparent" />
 
-        <div className="flex items-center gap-2">
-          <span className="px-3.5 py-1.5 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] text-xs font-semibold text-[#404040] shadow-2xs">
-            Matchday 14 • Season 2024/25
-          </span>
+        <div className="relative w-full p-6 sm:p-8 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+          <div className="max-w-xl bg-[#F7F4EE]/80 backdrop-blur-sm border border-[#E8E3D8]/70 rounded-xl p-5 sm:p-6">
+            <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#262626] text-white text-[10px] font-bold uppercase tracking-wider">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
+              Matchday 14 • {settings.season}
+            </span>
+            <h2 className="mt-4 text-3xl sm:text-4xl font-black text-[#242424] tracking-tight leading-tight">
+              {greeting},<br />
+              <span className="text-[#262626]">Coach {settings.coachName}</span>
+            </h2>
+            <p className="mt-2 text-sm text-[#404040] max-w-md">
+              Here&apos;s your team&apos;s performance overview for{' '}
+              <span className="font-semibold text-[#242424]">{settings.teamName}</span>.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActivePage('upload')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#262626] hover:bg-[#171717] text-white text-xs font-semibold transition-colors"
+            >
+              <UploadCloud className="w-4 h-4" />
+              Upload Match
+            </button>
+            <button
+              onClick={() => setActivePage('reports')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#FAF8F4]/90 hover:bg-[#FAF8F4] border border-[#D9D3C5] text-[#242424] text-xs font-semibold transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              Reports
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <SectionDivider label="Season Overview" />
 
       {/* 2. KPI CARDS ROW */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <KpiCard
           title="Total Sessions"
           value="12"
@@ -84,7 +127,9 @@ export const DashboardView: React.FC = () => {
         />
       </section>
 
-      {/* 2. RECENT ANALYSIS MAIN SECTION */}
+      <SectionDivider label="Latest Match Analysis" />
+
+      {/* 3. RECENT ANALYSIS MAIN SECTION */}
       <section className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 sm:p-6 shadow-sm space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E8E3D8]">
           <div>
@@ -235,12 +280,11 @@ export const DashboardView: React.FC = () => {
         </div>
       </section>
 
-      {/* 3. QUICK ACTIONS ROW */}
+      <SectionDivider label="Quick Actions" />
+
+      {/* 4. QUICK ACTIONS ROW */}
       <section className="space-y-4">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-[#858585]">
-          Quick Actions
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Card 1: Upload Video */}
           <div
             onClick={() => setActivePage('upload')}

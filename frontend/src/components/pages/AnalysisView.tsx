@@ -40,32 +40,30 @@ export const AnalysisView: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* 1. TOP HEADER & METADATA BAR */}
-      <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-10 animate-in fade-in duration-200">
+      {/* 1. PAGE TITLE */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-[#E8E3D8]">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-black text-[#242424] tracking-tight">
               Analysis Results
-            </h3>
+            </h1>
             <StatusBadge status={activeVideo.status} size="sm" />
           </div>
-          <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-[#858585] font-mono">
-            <span className="text-[#242424] font-bold">{activeVideo.filename}</span>
+          <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[#858585]">
+            <span className="text-[#242424] font-semibold">{activeVideo.matchName}</span>
             <span>•</span>
-            <span>{activeVideo.matchName}</span>
+            <span className="font-mono">{activeVideo.filename}</span>
             <span>•</span>
             <span>{activeVideo.date}</span>
             <span>•</span>
-            <span className="text-[#2563EB] font-semibold">Duration: {activeVideo.duration}</span>
+            <span>{activeVideo.duration}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded-xl bg-[#FBFAF7] border border-[#E8E3D8] text-xs font-mono text-[#404040] flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
-            <span>YOLOv11 Pipeline: 100% Processed</span>
-          </div>
+        <div className="px-3 py-1.5 rounded-lg bg-[#FAF8F4] border border-[#E8E3D8] text-xs text-[#404040] flex items-center gap-2 self-start md:self-auto">
+          <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
+          <span>YOLOv11 pipeline · 100% processed</span>
         </div>
       </div>
 
@@ -93,7 +91,8 @@ export const AnalysisView: React.FC = () => {
 
       {/* 3. MAIN CONTENT BASED ON SELECTED TAB */}
       {activeVideoTab === 'overview' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+        <div className="space-y-10">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
           {/* Left: Large Video Player with Computer Vision Overlays */}
           <div className="xl:col-span-8 space-y-4">
             <TacticalVideoPlayer
@@ -103,42 +102,6 @@ export const AnalysisView: React.FC = () => {
               confidenceThreshold={confidenceThreshold}
               showTimeline={true}
             />
-
-            {/* Analysis Key Metric Row below video */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-4 shadow-2xs text-center">
-              <div>
-                <span className="text-[11px] text-[#858585] font-semibold block">
-                  Ball Retention
-                </span>
-                <span className="text-xl font-extrabold text-[#16A34A] mt-0.5 block">
-                  58%
-                </span>
-              </div>
-              <div>
-                <span className="text-[11px] text-[#858585] font-semibold block">
-                  Field Tilt (Offense)
-                </span>
-                <span className="text-xl font-extrabold text-[#2563EB] mt-0.5 block">
-                  64.2%
-                </span>
-              </div>
-              <div>
-                <span className="text-[11px] text-[#858585] font-semibold block">
-                  Expected Goals (xG)
-                </span>
-                <span className="text-xl font-extrabold text-[#D97706] mt-0.5 block">
-                  2.14
-                </span>
-              </div>
-              <div>
-                <span className="text-[11px] text-[#858585] font-semibold block">
-                  Counter-Press Time
-                </span>
-                <span className="text-xl font-extrabold text-[#7C3AED] mt-0.5 block">
-                  4.8s avg
-                </span>
-              </div>
-            </div>
           </div>
 
           {/* Right: Detected Classes & Model Confidence */}
@@ -284,9 +247,31 @@ export const AnalysisView: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
 
-      {/* TAB 2: PLAYER TRACKING */}
+        {/* Key match metrics (displayed at the end) */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
+              Key Match Metrics
+            </span>
+            <div className="flex-1 h-px bg-[#E8E3D8]" />
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+            {[
+              { label: 'Ball Retention', value: '58%', color: 'text-[#16A34A]' },
+              { label: 'Field Tilt (Offense)', value: '64.2%', color: 'text-[#2563EB]' },
+              { label: 'Expected Goals (xG)', value: '2.14', color: 'text-[#D97706]' },
+              { label: 'Counter-Press Time', value: '4.8s', color: 'text-[#7C3AED]' },
+            ].map((m) => (
+              <div key={m.label} className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl p-5">
+                <span className="text-xs text-[#858585] font-medium block">{m.label}</span>
+                <span className={`text-2xl font-extrabold mt-1 block ${m.color}`}>{m.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        </div>
+      )}
       {activeVideoTab === 'tracking' && (
         <div className="space-y-4">
           <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 shadow-sm">
