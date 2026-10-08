@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@layer base {
+  :root {
+    --bg-dark: #020E1D;
+    --bg-secondary: #061122;
+    --bg-sidebar: #09162A;
+    --bg-card: #0D1D35;
+    --bg-card-hover: #0D203B;
+    --bg-card-elevated: #152239;
+    --border-main: #1B3554;
+    --border-subtle: #284255;
+    --blue-primary: #0B5CFF;
+    --blue-hover: #1677FF;
+    --blue-light: #3B82F6;
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --text-muted: #94A3B8;
+    --text-dim: #64748B;
+  }
+
+  body {
+    background-color: #020E1D;
+    color: #F8FAFC;
+    font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom scrollbars for dark sports-tech feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #061122;
+}
+::-webkit-scrollbar-thumb {
+  background: #1B3554;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #284255;
+}
+
+/* Radar pulse animation for YOLO scanning */
+@keyframes radar-sweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ping-slow {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+
+.animate-radar {
+  animation: radar-sweep 8s linear infinite;
+}
+
+.animate-pulse-slow {
+  animation: ping-slow 2.5s ease-in-out infinite;
+}
