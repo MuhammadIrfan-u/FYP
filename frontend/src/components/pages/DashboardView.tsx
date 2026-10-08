@@ -25,7 +25,7 @@ export const DashboardView: React.FC = () => {
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
   const SectionDivider = ({ label }: { label: string }) => (
-    <div className="flex items-center gap-4 pt-2">
+    <div className="flex items-center gap-4 -mb-6">
       <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
         {label}
       </span>
@@ -34,9 +34,9 @@ export const DashboardView: React.FC = () => {
   );
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-12 animate-in fade-in duration-200">
       {/* 1. HERO BANNER */}
-      <section className="relative overflow-hidden rounded-2xl border border-[#E8E3D8] min-h-[260px] sm:min-h-[300px] flex items-end">
+      <section className="relative overflow-hidden rounded-2xl border border-[#E8E3D8] min-h-[300px] sm:min-h-[340px] flex items-end">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/hero_section_image.jpg"
@@ -44,11 +44,11 @@ export const DashboardView: React.FC = () => {
           className="absolute inset-0 w-full h-full object-cover"
         />
         {/* Blend into cream palette */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#F7F4EE] via-[#F7F4EE]/85 to-[#F7F4EE]/10" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#F7F4EE] via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#F7F4EE]/80 via-[#F7F4EE]/35 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#F7F4EE]/70 to-transparent" />
 
         <div className="relative w-full p-6 sm:p-8 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
-          <div className="max-w-xl">
+          <div className="max-w-xl bg-[#F7F4EE]/80 backdrop-blur-sm border border-[#E8E3D8]/70 rounded-xl p-5 sm:p-6">
             <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#262626] text-white text-[10px] font-bold uppercase tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
               Matchday 14 • {settings.season}
@@ -85,7 +85,7 @@ export const DashboardView: React.FC = () => {
       <SectionDivider label="Season Overview" />
 
       {/* 2. KPI CARDS ROW */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <KpiCard
           title="Total Sessions"
           value="12"
@@ -284,7 +284,7 @@ export const DashboardView: React.FC = () => {
 
       {/* 4. QUICK ACTIONS ROW */}
       <section className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Card 1: Upload Video */}
           <div
             onClick={() => setActivePage('upload')}
