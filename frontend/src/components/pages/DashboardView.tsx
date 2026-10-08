@@ -23,7 +23,25 @@ export const DashboardView: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
-      {/* 1. KPI CARDS ROW */}
+      {/* 1. PAGE TITLE & OVERVIEW HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
+            Good evening, Coach!
+          </h3>
+          <p className="text-xs sm:text-sm text-[#858585] mt-1">
+            Here&apos;s your team&apos;s performance overview.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="px-3.5 py-1.5 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] text-xs font-semibold text-[#404040] shadow-2xs">
+            Matchday 14 • Season 2024/25
+          </span>
+        </div>
+      </div>
+
+      {/* 2. KPI CARDS ROW */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         <KpiCard
           title="Total Sessions"
