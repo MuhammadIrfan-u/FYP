@@ -64,6 +64,7 @@ export interface PlayerStats {
   distanceCovered: string;
   topSpeed: string;
   passAccuracy: string;
+  passesCompleted: string;
   successfulDribbles: string;
   shotsOnTarget: string;
   sprints: number;
