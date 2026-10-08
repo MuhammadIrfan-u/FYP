@@ -50,13 +50,13 @@ export const TrainingPlansView: React.FC = () => {
   const getDifficultyBadge = (difficulty: string) => {
     switch (difficulty) {
       case 'Beginner':
-        return 'bg-[#22C55E]/15 text-[#22C55E] border-[#22C55E]/30';
+        return 'bg-[#16A34A]/10 text-[#16A34A] border-[#16A34A]/20';
       case 'Intermediate':
-        return 'bg-[#FBBF24]/15 text-[#FBBF24] border-[#FBBF24]/30';
+        return 'bg-[#D97706]/10 text-[#D97706] border-[#D97706]/20';
       case 'Advanced':
-        return 'bg-[#EF4444]/15 text-[#EF4444] border-[#EF4444]/30';
+        return 'bg-[#DC2626]/10 text-[#DC2626] border-[#DC2626]/20';
       default:
-        return 'bg-[#3B82F6]/15 text-[#3B82F6] border-[#3B82F6]/30';
+        return 'bg-[#2563EB]/10 text-[#2563EB] border-[#2563EB]/20';
     }
   };
 
@@ -64,35 +64,35 @@ export const TrainingPlansView: React.FC = () => {
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* 1. TITLE & SUBTITLE */}
       <div>
-        <h3 className="text-xl sm:text-2xl font-black text-[#F8FAFC] tracking-tight">
+        <h3 className="text-xl sm:text-2xl font-black text-[#242424] tracking-tight">
           Training Plans
         </h3>
-        <p className="text-xs sm:text-sm text-[#94A3B8] mt-1">
+        <p className="text-xs sm:text-sm text-[#858585] mt-1">
           Personalised drills based on your team&apos;s analytics.
         </p>
       </div>
 
       {/* 2. PROMINENT AI COACH SECTION */}
-      <section className="bg-gradient-to-br from-[#0D1D35] via-[#102340] to-[#171A38] border border-[#1B3554] hover:border-[#8B5CF6]/50 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden space-y-6">
+      <section className="bg-[#FAF8F4] border border-[#E8E3D8] hover:border-[#7C3AED]/40 rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden space-y-6">
         {/* Subtle decorative purple glow */}
-        <div className="absolute top-0 right-0 w-80 h-80 bg-[#8B5CF6]/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-0 right-0 w-80 h-80 bg-[#7C3AED]/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="p-3.5 rounded-2xl bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 text-[#8B5CF6] shadow-lg shadow-purple-500/20 shrink-0">
+            <div className="p-3.5 rounded-2xl bg-[#7C3AED]/10 border border-[#7C3AED]/20 text-[#7C3AED] shadow-sm shrink-0">
               <Sparkles className="w-6 h-6 animate-pulse" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#A78BFA]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#7C3AED]">
                   AI Coaching Intelligence
                 </span>
-                <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse" />
               </div>
-              <h4 className="text-base sm:text-lg font-bold text-[#F8FAFC] mt-0.5">
+              <h4 className="text-base sm:text-lg font-bold text-[#242424] mt-0.5">
                 Based on your team&apos;s latest analysis, your passing accuracy can be improved.
               </h4>
-              <p className="text-xs text-[#CBD5E1] mt-1 max-w-2xl leading-relaxed">
+              <p className="text-xs text-[#404040] mt-1 max-w-2xl leading-relaxed">
                 YOLO telemetry detected a 22% final-third accuracy drop during minutes 60-75. We have scheduled 3 high-intensity combination drills to refine your midfield transitions.
               </p>
             </div>
@@ -102,26 +102,26 @@ export const TrainingPlansView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               onClick={() => handleQuickPrompt('Generate a comprehensive 5-day training plan for the squad')}
-              className="px-3.5 py-2 rounded-xl bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs font-bold shadow-lg shadow-purple-500/30 transition-all flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Generate Training Plan</span>
             </button>
             <button
               onClick={() => handleQuickPrompt('How can we improve passing accuracy in the final third?')}
-              className="px-3.5 py-2 rounded-xl bg-[#09162A] hover:bg-[#0D203B] border border-[#1B3554] text-[#CBD5E1] hover:text-white text-xs font-semibold transition-all"
+              className="px-3.5 py-2 rounded-xl bg-[#FBFAF7] hover:bg-[#EEEBE3] border border-[#E8E3D8] text-[#404040] hover:text-[#242424] text-xs font-semibold transition-all"
             >
               Improve Passing
             </button>
             <button
               onClick={() => handleQuickPrompt('Give me drills to improve shot finishing and conversion')}
-              className="px-3.5 py-2 rounded-xl bg-[#09162A] hover:bg-[#0D203B] border border-[#1B3554] text-[#CBD5E1] hover:text-white text-xs font-semibold transition-all"
+              className="px-3.5 py-2 rounded-xl bg-[#FBFAF7] hover:bg-[#EEEBE3] border border-[#E8E3D8] text-[#404040] hover:text-[#242424] text-xs font-semibold transition-all"
             >
               Improve Finishing
             </button>
             <button
               onClick={() => handleQuickPrompt('How can we optimize our counter-pressing defensive transition?')}
-              className="px-3.5 py-2 rounded-xl bg-[#09162A] hover:bg-[#0D203B] border border-[#1B3554] text-[#CBD5E1] hover:text-white text-xs font-semibold transition-all"
+              className="px-3.5 py-2 rounded-xl bg-[#FBFAF7] hover:bg-[#EEEBE3] border border-[#E8E3D8] text-[#404040] hover:text-[#242424] text-xs font-semibold transition-all"
             >
               Improve Defence
             </button>
@@ -129,13 +129,13 @@ export const TrainingPlansView: React.FC = () => {
         </div>
 
         {/* AI Chat Dialogue Stream */}
-        <div className="bg-[#061122]/80 backdrop-blur-md border border-[#1B3554] rounded-2xl p-4 sm:p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#1B3554]/60 text-xs">
-            <span className="font-bold text-[#F8FAFC] flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-[#8B5CF6]" />
+        <div className="bg-[#FBFAF7] border border-[#E8E3D8] rounded-2xl p-4 sm:p-5 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-[#E8E3D8] text-xs">
+            <span className="font-bold text-[#242424] flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-[#7C3AED]" />
               <span>Interactive Tactical Assistant</span>
             </span>
-            <span className="text-[11px] text-[#64748B] font-mono">
+            <span className="text-[11px] text-[#858585] font-mono">
               Live Model Synced with Video Telemetry
             </span>
           </div>
@@ -151,8 +151,8 @@ export const TrainingPlansView: React.FC = () => {
                 <div
                   className={`max-w-xl p-3.5 rounded-2xl text-xs leading-relaxed ${
                     msg.sender === 'user'
-                      ? 'bg-[#0B5CFF] text-white rounded-tr-none'
-                      : 'bg-[#0D1D35] text-[#CBD5E1] border border-[#1B3554] rounded-tl-none'
+                      ? 'bg-[#262626] text-white rounded-tr-none'
+                      : 'bg-[#EEEBE3] text-[#242424] border border-[#E8E3D8] rounded-tl-none'
                   }`}
                 >
                   <p>{msg.text}</p>
@@ -168,7 +168,7 @@ export const TrainingPlansView: React.FC = () => {
                       <button
                         key={idx}
                         onClick={() => handleQuickPrompt(s)}
-                        className="text-[10px] px-2.5 py-1 rounded-full bg-[#152239] hover:bg-[#1B3554] text-[#A78BFA] border border-[#8B5CF6]/30 transition-all font-medium"
+                        className="text-[10px] px-2.5 py-1 rounded-full bg-[#FBFAF7] hover:bg-[#EEEBE3] text-[#7C3AED] border border-[#7C3AED]/30 transition-all font-medium"
                       >
                         + {s}
                       </button>
@@ -186,11 +186,11 @@ export const TrainingPlansView: React.FC = () => {
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder="Ask AI Coach about your team, players, or drills..."
-              className="flex-1 bg-[#09162A] border border-[#1B3554] rounded-xl px-4 py-2.5 text-xs text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:border-[#8B5CF6] transition-colors"
+              className="flex-1 bg-[#FAF8F4] border border-[#E8E3D8] rounded-xl px-4 py-2.5 text-xs text-[#242424] placeholder-[#858585] focus:outline-none focus:border-[#7C3AED] transition-colors"
             />
             <button
               type="submit"
-              className="px-4 py-2.5 rounded-xl bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-purple-500/20"
+              className="px-4 py-2.5 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
             >
               <Send className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Ask Coach</span>
@@ -207,8 +207,8 @@ export const TrainingPlansView: React.FC = () => {
             onClick={() => setActiveCategory(cat)}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeCategory === cat
-                ? 'bg-[#0B5CFF] text-white shadow-lg shadow-blue-500/25'
-                : 'bg-[#0D1D35] hover:bg-[#0D203B] text-[#94A3B8] border border-[#1B3554]'
+                ? 'bg-[#262626] text-white shadow-sm'
+                : 'bg-[#FBFAF7] hover:bg-[#EEEBE3] text-[#404040] border border-[#E8E3D8]'
             }`}
           >
             {cat}
@@ -223,11 +223,11 @@ export const TrainingPlansView: React.FC = () => {
           return (
             <div
               key={drill.id}
-              className="group bg-[#0D1D35] hover:bg-[#0D203B] border border-[#1B3554] hover:border-[#3B82F6]/50 rounded-2xl overflow-hidden shadow-xl transition-all duration-200 flex flex-col justify-between"
+              className="group bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#262626] rounded-2xl overflow-hidden shadow-sm transition-all duration-200 flex flex-col justify-between"
             >
               <div>
                 {/* Training Image Header */}
-                <div className="relative aspect-video w-full bg-[#061122] overflow-hidden">
+                <div className="relative aspect-video w-full bg-[#EEEBE3] overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={drill.image || '/training_drill_session.jpg'}
@@ -236,30 +236,30 @@ export const TrainingPlansView: React.FC = () => {
                   />
                   <div className="absolute top-3 left-3 flex items-center gap-2">
                     <span
-                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-md ${badgeStyle}`}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-sm ${badgeStyle}`}
                     >
                       {drill.difficulty}
                     </span>
                   </div>
-                  <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/80 text-white font-mono text-[11px] font-semibold flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-[#3B82F6]" />
+                  <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/75 text-white font-mono text-[11px] font-semibold flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-[#E8E3D8]" />
                     <span>{drill.duration}</span>
                   </div>
                 </div>
 
                 {/* Content */}
                 <div className="p-5 space-y-3">
-                  <h4 className="text-base font-bold text-[#F8FAFC] group-hover:text-[#3B82F6] transition-colors">
+                  <h4 className="text-base font-bold text-[#242424] group-hover:text-[#171717] transition-colors">
                     {drill.name}
                   </h4>
-                  <p className="text-xs text-[#94A3B8] leading-relaxed">
+                  <p className="text-xs text-[#858585] leading-relaxed">
                     {drill.description}
                   </p>
 
                   {/* AI Reason callout if available */}
                   {drill.aiRecommendedReason && (
-                    <div className="p-2.5 rounded-xl bg-[#8B5CF6]/10 border border-[#8B5CF6]/30 text-[11px] text-[#A78BFA] flex items-start gap-2">
-                      <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#8B5CF6]" />
+                    <div className="p-2.5 rounded-xl bg-[#7C3AED]/10 border border-[#7C3AED]/20 text-[11px] text-[#7C3AED] flex items-start gap-2">
+                      <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#7C3AED]" />
                       <span>{drill.aiRecommendedReason}</span>
                     </div>
                   )}
@@ -269,7 +269,7 @@ export const TrainingPlansView: React.FC = () => {
                     {drill.focusAreas.map((tag, idx) => (
                       <span
                         key={idx}
-                        className="text-[10px] px-2 py-0.5 rounded-md bg-[#09162A] text-[#CBD5E1] border border-[#1B3554]"
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-[#EEEBE3] text-[#404040] border border-[#E8E3D8]"
                       >
                         {tag}
                       </span>
@@ -282,7 +282,7 @@ export const TrainingPlansView: React.FC = () => {
               <div className="p-5 pt-0">
                 <button
                   onClick={() => showToast(`Drill "${drill.name}" added to today's squad training schedule!`)}
-                  className="w-full py-2.5 rounded-xl bg-[#0B5CFF] hover:bg-[#1677FF] text-white text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 group-hover:shadow-blue-500/30"
+                  className="w-full py-2.5 rounded-xl bg-[#262626] hover:bg-[#171717] text-white text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm"
                 >
                   <Play className="w-3.5 h-3.5 fill-white" />
                   <span>Start Training</span>
