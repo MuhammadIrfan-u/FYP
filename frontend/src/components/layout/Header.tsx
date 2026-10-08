@@ -12,7 +12,6 @@ import { useFootball } from '@/context/FootballContext';
 
 export const Header: React.FC = () => {
   const {
-    activePage,
     setActivePage,
     mobileMenuOpen,
     setMobileMenuOpen,
@@ -20,64 +19,6 @@ export const Header: React.FC = () => {
   } = useFootball();
 
   const [notificationsOpen, setNotificationsOpen] = useState<boolean>(false);
-
-  // Dynamic header titles based on page
-  const getPageInfo = () => {
-    switch (activePage) {
-      case 'dashboard':
-        return {
-          title: 'Good evening, Coach!',
-          subtitle: "Here's your team's performance overview.",
-        };
-      case 'upload':
-        return {
-          title: 'Upload Video',
-          subtitle: 'Upload a match or training session to get AI-powered analysis.',
-        };
-      case 'analysis':
-        return {
-          title: 'Analysis Results',
-          subtitle: 'YOLO Computer Vision detection breakdown & tactical intelligence.',
-        };
-      case 'players':
-        return {
-          title: 'Player Analytics',
-          subtitle: 'Track individual performance, heatmaps, and movement paths.',
-        };
-      case 'events':
-        return {
-          title: 'Match Events',
-          subtitle: 'Chronological timeline of detected passes, shots, dribbles, and sprints.',
-        };
-      case 'team':
-        return {
-          title: 'Team Analytics',
-          subtitle: 'Collective metrics, tactical formations, passing networks, and territorial zones.',
-        };
-      case 'training':
-        return {
-          title: 'Training Plans',
-          subtitle: "Personalised drills based on your team's analytics and AI coaching advice.",
-        };
-      case 'reports':
-        return {
-          title: 'Reports',
-          subtitle: 'Comprehensive match dossiers and exported analytical summaries.',
-        };
-      case 'settings':
-        return {
-          title: 'Settings',
-          subtitle: 'Team profile, computer vision thresholds, and coaching preferences.',
-        };
-      default:
-        return {
-          title: 'Good evening, Coach!',
-          subtitle: "Here's your team's performance overview.",
-        };
-    }
-  };
-
-  const { title, subtitle } = getPageInfo();
 
   const notifications = [
     {
@@ -105,7 +46,7 @@ export const Header: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-30 bg-[#F7F4EE]/90 backdrop-blur-md border-b border-[#E8E3D8] px-4 lg:px-8 py-3.5 flex items-center justify-between transition-all">
-      {/* Left: Mobile hamburger & Dynamic Page Heading */}
+      {/* Left: Mobile hamburger menu trigger */}
       <div className="flex items-center gap-3">
         {/* Mobile menu trigger */}
         <button
@@ -114,15 +55,6 @@ export const Header: React.FC = () => {
         >
           {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
-
-        <div>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-[#242424] tracking-tight">
-            {title}
-          </h2>
-          <p className="text-xs text-[#858585] font-medium hidden sm:block">
-            {subtitle}
-          </p>
-        </div>
       </div>
 
       {/* Right Side: Search, Notification icon, Coach Profile */}
