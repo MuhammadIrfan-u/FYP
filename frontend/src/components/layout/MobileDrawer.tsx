@@ -48,31 +48,31 @@ export const MobileDrawer: React.FC = () => {
     <div className="fixed inset-0 z-50 lg:hidden flex">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+        className="fixed inset-0 bg-[#262626]/40 backdrop-blur-xs transition-opacity"
         onClick={() => setMobileMenuOpen(false)}
       />
 
       {/* Drawer */}
-      <div className="relative w-72 max-w-[80vw] bg-[#09162A] border-r border-[#1B3554] h-full flex flex-col justify-between p-4 z-10 animate-in slide-in-from-left duration-200">
+      <div className="relative w-72 max-w-[80vw] bg-[#F9F7F2] border-r border-[#E8E3D8] h-full flex flex-col justify-between p-4 z-10 animate-in slide-in-from-left duration-200 shadow-xl">
         <div>
           {/* Header */}
-          <div className="flex items-center justify-between pb-4 border-b border-[#1B3554]">
+          <div className="flex items-center justify-between pb-4 border-b border-[#E8E3D8]">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-[#0B5CFF] flex items-center justify-center text-white font-bold text-xs">
+              <div className="w-8 h-8 rounded-lg bg-[#262626] flex items-center justify-center text-white font-bold text-xs">
                 FC
               </div>
               <div>
-                <span className="text-sm font-bold text-white block">
+                <span className="text-sm font-bold text-[#242424] block">
                   FootballCoach
                 </span>
-                <span className="text-[10px] text-[#94A3B8]">
+                <span className="text-[10px] text-[#858585]">
                   Train Smarter. Play Better.
                 </span>
               </div>
             </div>
             <button
               onClick={() => setMobileMenuOpen(false)}
-              className="p-1 rounded-lg text-[#94A3B8] hover:text-white"
+              className="p-1 rounded-lg text-[#858585] hover:text-[#242424]"
             >
               <X className="w-5 h-5" />
             </button>
@@ -89,8 +89,8 @@ export const MobileDrawer: React.FC = () => {
                   onClick={() => handleNav(item.id)}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                     isActive
-                      ? 'bg-[#0B5CFF] text-white shadow-lg shadow-blue-500/30'
-                      : 'text-[#94A3B8] hover:bg-[#0D203B] hover:text-white'
+                      ? 'bg-[#262626] text-white shadow-sm'
+                      : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -98,7 +98,7 @@ export const MobileDrawer: React.FC = () => {
                     <span>{item.label}</span>
                   </div>
                   {item.badge && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/20 text-white">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#EEEBE3] text-[#404040] border border-[#D9D3C5]">
                       {item.badge}
                     </span>
                   )}
@@ -111,13 +111,13 @@ export const MobileDrawer: React.FC = () => {
         {/* Bottom AI Box */}
         <div
           onClick={() => handleNav('training')}
-          className="bg-gradient-to-r from-[#0D1D35] to-[#152239] border border-[#1B3554] rounded-xl p-3 cursor-pointer"
+          className="bg-[#FAF8F4] border border-[#E8E3D8] hover:border-[#7C3AED]/40 rounded-xl p-3 cursor-pointer shadow-sm"
         >
-          <div className="flex items-center gap-2 text-xs font-bold text-white mb-1">
-            <Sparkles className="w-3.5 h-3.5 text-[#8B5CF6]" />
+          <div className="flex items-center gap-2 text-xs font-bold text-[#242424] mb-1">
+            <Sparkles className="w-3.5 h-3.5 text-[#7C3AED]" />
             <span>AI Coach Assistant</span>
           </div>
-          <p className="text-[10px] text-[#94A3B8]">
+          <p className="text-[10px] text-[#858585]">
             Get personalised drills and tactical advice.
           </p>
         </div>

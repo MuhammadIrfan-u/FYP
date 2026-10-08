@@ -13,7 +13,6 @@ import {
   Settings,
   Sparkles,
   ChevronRight,
-  ShieldAlert,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { PageId } from '@/types/football';
@@ -46,14 +45,14 @@ export const Sidebar: React.FC = () => {
   };
 
   return (
-    <aside className="w-64 bg-[#09162A] border-r border-[#1B3554] flex flex-col justify-between h-screen fixed left-0 top-0 z-40 select-none">
+    <aside className="w-64 bg-[#F9F7F2] border-r border-[#E8E3D8] flex flex-col justify-between h-screen fixed left-0 top-0 z-40 select-none">
       {/* Brand Header */}
       <div>
-        <div className="p-5 border-b border-[#1B3554]/70 flex items-center gap-3">
-          {/* Logo Icon */}
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0B5CFF] to-[#3B82F6] flex items-center justify-center shadow-lg shadow-blue-500/25 border border-white/20">
+        <div className="p-5 border-b border-[#E8E3D8] flex items-center gap-3">
+          {/* Logo Icon in charcoal */}
+          <div className="w-10 h-10 rounded-xl bg-[#262626] flex items-center justify-center shadow-sm border border-[#D9D3C5]">
             <svg
-              className="w-6 h-6 text-white"
+              className="w-6 h-6 text-[#F9F7F2]"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -70,13 +69,13 @@ export const Sidebar: React.FC = () => {
             </svg>
           </div>
           <div>
-            <h1 className="text-base font-extrabold tracking-tight text-[#F8FAFC] flex items-center gap-1.5">
+            <h1 className="text-base font-extrabold tracking-tight text-[#242424] flex items-center gap-1.5">
               FootballCoach
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#0B5CFF]/20 text-[#3B82F6] border border-[#0B5CFF]/30">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#EEEBE3] text-[#242424] border border-[#D9D3C5]">
                 PRO
               </span>
             </h1>
-            <p className="text-[11px] font-medium text-[#94A3B8]">
+            <p className="text-[11px] font-medium text-[#858585]">
               Train Smarter. Play Better.
             </p>
           </div>
@@ -84,7 +83,7 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation List */}
         <nav className="p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-250px)]">
-          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#858585]">
             Main Navigation
           </div>
           {navItems.map((item) => {
@@ -97,8 +96,8 @@ export const Sidebar: React.FC = () => {
                 onClick={() => handleNavClick(item.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 group ${
                   isActive
-                    ? 'bg-[#0B5CFF] text-[#FFFFFF] shadow-[0_0_18px_rgba(11,92,255,0.4)] font-semibold'
-                    : 'text-[#94A3B8] hover:bg-[#0D203B] hover:text-[#F8FAFC]'
+                    ? 'bg-[#262626] text-[#FFFFFF] shadow-sm font-semibold'
+                    : 'text-[#858585] hover:bg-[#EEEBE3] hover:text-[#242424]'
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -106,7 +105,7 @@ export const Sidebar: React.FC = () => {
                     className={`w-4 h-4 transition-colors ${
                       isActive
                         ? 'text-white'
-                        : 'text-[#64748B] group-hover:text-[#3B82F6]'
+                        : 'text-[#555555] group-hover:text-[#242424]'
                     }`}
                   />
                   <span>{item.label}</span>
@@ -118,8 +117,8 @@ export const Sidebar: React.FC = () => {
                       isActive
                         ? 'bg-white/20 text-white'
                         : item.badge === 'AI'
-                        ? 'bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30'
-                        : 'bg-[#0B5CFF]/20 text-[#3B82F6] border border-[#0B5CFF]/30'
+                        ? 'bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20'
+                        : 'bg-[#EEEBE3] text-[#404040] border border-[#D9D3C5]'
                     }`}
                   >
                     {item.badge}
@@ -132,29 +131,26 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* AI Coach Card at Sidebar Bottom */}
-      <div className="p-3 border-t border-[#1B3554]/60">
+      <div className="p-3 border-t border-[#E8E3D8]">
         <div
           onClick={() => handleNavClick('training')}
-          className="relative group cursor-pointer bg-gradient-to-br from-[#0D1D35] to-[#152239] hover:to-[#0D203B] border border-[#1B3554] hover:border-[#8B5CF6]/50 rounded-2xl p-3.5 transition-all duration-200 shadow-lg shadow-black/30 overflow-hidden"
+          className="relative group cursor-pointer bg-[#FAF8F4] hover:bg-[#FBFAF7] border border-[#E8E3D8] hover:border-[#7C3AED]/40 rounded-2xl p-3.5 transition-all duration-200 shadow-sm overflow-hidden"
         >
-          {/* Subtle purple/blue AI accent lighting */}
-          <div className="absolute -right-6 -bottom-6 w-20 h-20 bg-[#8B5CF6]/15 rounded-full blur-xl pointer-events-none group-hover:bg-[#8B5CF6]/25 transition-all" />
-
           <div className="flex items-center gap-2 mb-1.5">
-            <div className="p-1.5 rounded-lg bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30">
+            <div className="p-1.5 rounded-lg bg-[#7C3AED]/10 text-[#7C3AED] border border-[#7C3AED]/20">
               <Sparkles className="w-3.5 h-3.5" />
             </div>
-            <span className="text-xs font-bold text-[#F8FAFC] tracking-wide">
+            <span className="text-xs font-bold text-[#242424] tracking-wide">
               AI Coach
             </span>
-            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
           </div>
 
-          <p className="text-[11px] text-[#94A3B8] leading-tight line-clamp-2">
+          <p className="text-[11px] text-[#858585] leading-tight line-clamp-2">
             Get personalised training plans and feedback.
           </p>
 
-          <div className="mt-2.5 pt-2 border-t border-[#1B3554]/60 flex items-center justify-between text-[11px] font-semibold text-[#8B5CF6] group-hover:text-[#A78BFA]">
+          <div className="mt-2.5 pt-2 border-t border-[#E8E3D8] flex items-center justify-between text-[11px] font-semibold text-[#7C3AED] group-hover:text-[#6D28D9]">
             <span>Open Coach Studio</span>
             <ChevronRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
           </div>
