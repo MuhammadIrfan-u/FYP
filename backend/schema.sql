@@ -235,4 +235,31 @@ USING (
 WITH CHECK (
     bucket_id = 'football-videos'
     AND (storage.foldername(name))[1] = auth.uid()::text
-);
+);
+
+
+-- ==============================================================================
+-- 7. Remove Email Confirmation Requirement & Auto-Confirm All Users
+-- ==============================================================================
+
+-- Auto-confirm any existing unconfirmed users
+UPDATE auth.users
+SET email_confirmed_at = NOW(), confirmed_at = NOW()
+WHERE email_confirmed_at IS NULL;
+
+-- Automatically mark any future user as confirmed upon creation
+CREATE OR REPLACE FUNCTION public.auto_confirm_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.email_confirmed_at = COALESCE(NEW.email_confirmed_at, NOW());
+    NEW.confirmed_at = COALESCE(NEW.confirmed_at, NOW());
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_auto_confirm ON auth.users;
+CREATE TRIGGER on_auth_user_created_auto_confirm
+BEFORE INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.auto_confirm_new_user();
+

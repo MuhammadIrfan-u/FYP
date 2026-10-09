@@ -79,13 +79,7 @@ export const AuthView: React.FC = () => {
       const res = await signUp(cleanEmail, password);
       setIsSubmitting(false);
       if (res.success) {
-        if (res.requiresEmailConfirmation) {
-          setInfoMessage(
-            'Account created! A confirmation link was sent to your email. Please check your inbox to verify before signing in.'
-          );
-        } else {
-          setInfoMessage('Account created successfully! Logging you in...');
-        }
+        setInfoMessage('Account created successfully! Logging you in...');
       }
     }
   };
