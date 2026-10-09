@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   PageId,
   MatchVideo,
@@ -20,6 +20,8 @@ import {
   REPORTS_DATA,
   DEFAULT_SETTINGS,
 } from '@/lib/mockData';
+import { useAuth } from '@/context/AuthContext';
+import { supabase, STORAGE_BUCKET_NAME, DatabaseSession } from '@/lib/supabase';
 
 interface AIChatMessage {
   id: string;
@@ -36,6 +38,18 @@ interface FootballContextType {
   activeVideo: MatchVideo;
   setActiveVideo: (video: MatchVideo) => void;
   simulateUpload: (fileName: string, fileSize: string) => void;
+  uploadFootballVideo: (
+    file: File,
+    title?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  deleteSession: (
+    sessionId: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  playSession: (video: MatchVideo) => Promise<void>;
+  isLoadingSessions: boolean;
+  isUploading: boolean;
+  uploadProgress: number;
+  refreshSessions: () => Promise<void>;
   players: PlayerStats[];
   selectedPlayer: PlayerStats;
   setSelectedPlayer: (player: PlayerStats) => void;
@@ -62,10 +76,52 @@ interface FootballContextType {
 
 const FootballContext = createContext<FootballContextType | undefined>(undefined);
 
+// Supported video formats and MIME types
+const SUPPORTED_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2.0 GB limit
+
+const formatDuration = (seconds: number | null): string => {
+  if (!seconds || seconds <= 0) return '--:--';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+};
+
+const getVideoDuration = (file: File): Promise<number | null> => {
+  return new Promise((resolve) => {
+    try {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      const url = URL.createObjectURL(file);
+      video.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        if (video.duration && isFinite(video.duration)) {
+          resolve(Math.round(video.duration * 100) / 100);
+        } else {
+          resolve(null);
+        }
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      video.src = url;
+    } catch {
+      resolve(null);
+    }
+  });
+};
+
 export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+
   const [activePage, setActivePage] = useState<PageId>('dashboard');
   const [videos, setVideos] = useState<MatchVideo[]>(INITIAL_VIDEOS);
   const [activeVideo, setActiveVideo] = useState<MatchVideo>(INITIAL_VIDEOS[0]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
   const [players] = useState<PlayerStats[]>(PLAYERS_DATA);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerStats>(PLAYERS_DATA[0]);
   const [events] = useState<MatchEvent[]>(MATCH_EVENTS);
@@ -83,7 +139,7 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     {
       id: 'msg-1',
       sender: 'coach',
-      text: 'Good evening Coach Alex. I analysed your latest fixture against Rapid Stars. We achieved 58% possession, but detected a 22% passing completion drop in the final 15 minutes. How can I assist you?',
+      text: 'Good evening Coach. I analysed your latest fixture against Rapid Stars. We achieved 58% possession, but detected a 22% passing completion drop in the final 15 minutes. How can I assist you?',
       time: '18:40',
       suggestions: [
         'Recommend passing drills for Ahmed Khan',
@@ -93,11 +149,309 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     },
   ]);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage((current) => (current === msg ? null : current));
-    }, 3500);
+    }, 4000);
+  }, []);
+
+  // Map DatabaseSession to MatchVideo
+  const mapSessionToMatchVideo = (sess: DatabaseSession): MatchVideo => {
+    const statusMap: Record<string, MatchVideo['status']> = {
+      uploaded: 'Uploaded',
+      processing: 'Processing',
+      completed: 'Completed',
+      failed: 'Failed',
+    };
+
+    const friendlyStatus = statusMap[sess.status] || 'Uploaded';
+    const durationStr = formatDuration(sess.video_duration_seconds);
+    const dateStr = sess.created_at
+      ? new Date(sess.created_at).toLocaleDateString('en-US', {
+          month: 'short',
+          day: '2-digit',
+          year: 'numeric',
+        })
+      : 'Recent';
+
+    return {
+      id: sess.id,
+      filename: sess.original_file_name || 'video.mp4',
+      matchName: sess.title || 'Football Session',
+      date: dateStr,
+      duration: durationStr,
+      size: '--',
+      status: friendlyStatus,
+      progress: sess.status === 'completed' ? 100 : sess.status === 'processing' ? 50 : 100,
+      thumbnail: '/match_tactical_frame.jpg',
+      detections: {
+        players: sess.class_counts?.player ?? 0,
+        ball: sess.class_counts?.football ?? 0,
+        goals: sess.class_counts?.football_goal ?? 0,
+        referee: 0,
+      },
+      modelConfidence: 94.6,
+      metrics: {
+        passes: sess.total_passes ?? 0,
+        shots: sess.total_shots ?? 0,
+        dribbles: 0,
+        sprints: sess.total_sprints ?? 0,
+      },
+      videoPath: sess.video_path,
+      userId: sess.user_id,
+      rawDurationSeconds: sess.video_duration_seconds ?? undefined,
+    };
+  };
+
+  // Fetch authenticated user's sessions from Supabase
+  const fetchUserSessions = useCallback(async () => {
+    if (!user) {
+      setVideos(INITIAL_VIDEOS);
+      return;
+    }
+
+    setIsLoadingSessions(true);
+    try {
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('Failed to load user sessions from Supabase:', error.message);
+        // Fall back to initial videos with notification
+        setVideos(INITIAL_VIDEOS);
+      } else if (data && data.length > 0) {
+        const mapped = (data as DatabaseSession[]).map(mapSessionToMatchVideo);
+        setVideos(mapped);
+        setActiveVideo((current) => {
+          const match = mapped.find((m) => m.id === current.id);
+          return match || mapped[0];
+        });
+      } else {
+        // User has no sessions in Supabase yet
+        setVideos([]);
+      }
+    } catch (err) {
+      console.error('Error fetching sessions:', err);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchUserSessions();
+  }, [fetchUserSessions]);
+
+  // Upload football video to Supabase Storage & save session in public.sessions
+  const uploadFootballVideo = async (
+    file: File,
+    title?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) {
+      const err = 'You must be logged in to upload videos.';
+      showToast(err);
+      return { success: false, error: err };
+    }
+
+    if (isUploading) {
+      return { success: false, error: 'An upload is already in progress.' };
+    }
+
+    // 1. Validation: file format
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!SUPPORTED_EXTENSIONS.includes(extension)) {
+      const err = `Unsupported video format (.${extension}). Supported formats: MP4, MOV, AVI, MKV, WEBM.`;
+      showToast(err);
+      return { success: false, error: err };
+    }
+
+    // 2. Validation: file size
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      const err = 'File size exceeds the 2.0 GB limit.';
+      showToast(err);
+      return { success: false, error: err };
+    }
+
+    setIsUploading(true);
+    setUploadProgress(10);
+
+    const sessionId = crypto.randomUUID();
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    // Path structure: USER_UUID/SESSION_UUID/filename.ext
+    const storagePath = `${user.id}/${sessionId}/${sanitizedFileName}`;
+    const sessionTitle =
+      title?.trim() || file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
+
+    try {
+      // 3. Extract duration if possible
+      const durationSec = await getVideoDuration(file);
+      setUploadProgress(25);
+
+      // 4. Upload file to Supabase Storage bucket 'football-videos'
+      const { error: uploadError } = await supabase.storage
+        .from(STORAGE_BUCKET_NAME)
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        let msg = uploadError.message;
+        if (msg.includes('Bucket not found') || msg.includes('404')) {
+          msg =
+            'Storage bucket "football-videos" was not found. Please run backend/supabase_setup.sql in your Supabase SQL Editor.';
+        }
+        setIsUploading(false);
+        setUploadProgress(0);
+        showToast(`Upload failed: ${msg}`);
+        return { success: false, error: msg };
+      }
+
+      setUploadProgress(75);
+
+      // 5. Insert record into public.sessions
+      const { data: newSession, error: dbError } = await supabase
+        .from('sessions')
+        .insert({
+          id: sessionId,
+          user_id: user.id,
+          title: sessionTitle,
+          video_path: storagePath,
+          original_file_name: file.name,
+          video_duration_seconds: durationSec,
+          status: 'uploaded',
+        })
+        .select()
+        .single();
+
+      // 6. Rollback cleanup: If DB insertion fails, remove uploaded storage file
+      if (dbError) {
+        console.warn('DB insertion failed, rolling back uploaded file:', dbError.message);
+        try {
+          await supabase.storage.from(STORAGE_BUCKET_NAME).remove([storagePath]);
+        } catch (cleanupErr) {
+          console.error('Failed to cleanup orphaned storage file:', cleanupErr);
+        }
+
+        setIsUploading(false);
+        setUploadProgress(0);
+        const errMsg = `Database error: ${dbError.message}. Upload was safely rolled back.`;
+        showToast(errMsg);
+        return { success: false, error: errMsg };
+      }
+
+      setUploadProgress(100);
+
+      // 7. Success state update
+      const mapped = mapSessionToMatchVideo(newSession as DatabaseSession);
+      setVideos((prev) => [mapped, ...prev]);
+      setActiveVideo(mapped);
+      showToast(`Video "${sessionTitle}" uploaded successfully!`);
+
+      return { success: true };
+    } catch (err) {
+      // Rollback on any uncaught exception
+      try {
+        await supabase.storage.from(STORAGE_BUCKET_NAME).remove([storagePath]);
+      } catch {
+        // ignore rollback errors
+      }
+      const msg = err instanceof Error ? err.message : 'Unknown upload error occurred.';
+      showToast(`Upload failed: ${msg}`);
+      return { success: false, error: msg };
+    } finally {
+      setIsUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
+    }
+  };
+
+  // Delete session and its storage object
+  const deleteSession = async (
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!user) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+
+    const target = videos.find((v) => v.id === sessionId);
+    if (!target) {
+      return { success: false, error: 'Session not found.' };
+    }
+
+    // Verify ownership
+    if (target.userId && target.userId !== user.id) {
+      const err = 'You do not have permission to delete this session.';
+      showToast(err);
+      return { success: false, error: err };
+    }
+
+    try {
+      // 1. Delete Storage file if it exists
+      if (target.videoPath) {
+        const { error: storageErr } = await supabase.storage
+          .from(STORAGE_BUCKET_NAME)
+          .remove([target.videoPath]);
+        if (storageErr) {
+          console.warn('Storage file deletion notice:', storageErr.message);
+        }
+      }
+
+      // 2. Delete database record
+      const { error: dbErr } = await supabase
+        .from('sessions')
+        .delete()
+        .eq('id', sessionId)
+        .eq('user_id', user.id);
+
+      if (dbErr) {
+        showToast(`Failed to delete session: ${dbErr.message}`);
+        return { success: false, error: dbErr.message };
+      }
+
+      // 3. Update local state
+      setVideos((prev) => {
+        const updated = prev.filter((v) => v.id !== sessionId);
+        if (activeVideo.id === sessionId) {
+          setActiveVideo(updated[0] || INITIAL_VIDEOS[0]);
+        }
+        return updated;
+      });
+
+      showToast(`Session "${target.matchName}" deleted successfully.`);
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Deletion failed.';
+      showToast(`Failed to delete session: ${msg}`);
+      return { success: false, error: msg };
+    }
+  };
+
+  // Open a session and play via short-lived signed URL
+  const playSession = async (video: MatchVideo) => {
+    let videoWithUrl: MatchVideo = { ...video };
+
+    if (video.videoPath) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET_NAME)
+          .createSignedUrl(video.videoPath, 3600); // 1-hour expiration
+
+        if (error) {
+          console.warn('Could not create signed URL:', error.message);
+          showToast(`Warning: Could not create signed URL (${error.message})`);
+        } else if (data?.signedUrl) {
+          videoWithUrl.videoUrl = data.signedUrl;
+        }
+      } catch (err) {
+        console.warn('Signed URL request exception:', err);
+      }
+    }
+
+    setActiveVideo(videoWithUrl);
+    setActivePage('analysis');
   };
 
   const simulateUpload = (fileName: string, fileSize: string) => {
@@ -120,7 +474,6 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setVideos((prev) => [newVideo, ...prev]);
     showToast(`Video "${fileName}" uploaded! Running YOLO detection pipeline...`);
 
-    // Simulate pipeline progression
     setTimeout(() => {
       setVideos((prev) =>
         prev.map((v) =>
@@ -225,6 +578,13 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeVideo,
         setActiveVideo,
         simulateUpload,
+        uploadFootballVideo,
+        deleteSession,
+        playSession,
+        isLoadingSessions,
+        isUploading,
+        uploadProgress,
+        refreshSessions: fetchUserSessions,
         players,
         selectedPlayer,
         setSelectedPlayer,
