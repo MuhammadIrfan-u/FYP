@@ -67,6 +67,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const formatAuthError = (error: AuthError | Error): string => {
     const msg = error.message.toLowerCase();
+    if (msg.includes('email logins are disabled') || msg.includes('provider is disabled')) {
+      return 'Email provider is turned off in Supabase. In your Supabase Dashboard, go to Authentication -> Providers -> Email and turn "Enable Email provider" back ON.';
+    }
     if (msg.includes('invalid login credentials') || msg.includes('invalid_grant')) {
       return 'Invalid email or password. Please verify your credentials and try again.';
     }
