@@ -160,9 +160,9 @@ export const AuthView: React.FC = () => {
         {(validationError || authError) && (
           <div className="mb-5 p-3.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] flex items-start gap-2.5 text-xs text-[#991B1B]">
             <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626] mt-0.5" />
-            <span className="leading-relaxed font-medium">
-              {validationError || authError}
-            </span>
+            <div className="leading-relaxed font-medium">
+              <span>{validationError || authError}</span>
+            </div>
           </div>
         )}
 

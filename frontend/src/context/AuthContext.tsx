@@ -13,7 +13,7 @@ interface AuthContextType {
   signUp: (
     email: string,
     password: string
-  ) => Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean }>;
+  ) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   clearError: () => void;
 }
@@ -79,8 +79,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (msg.includes('password should be at least')) {
       return 'Password must be at least 6 characters long.';
     }
-    if (msg.includes('rate limit')) {
-      return 'Too many login attempts. Please wait a minute and try again.';
+    if (
+      msg.includes('rate limit') ||
+      msg.includes('too many') ||
+      msg.includes('over_email_send_rate_limit')
+    ) {
+      return 'Supabase email rate limit reached (free tier limit: 3-4 signup emails/hour). To fix this instantly: in your Supabase Dashboard, go to Authentication -> Providers -> Email and turn OFF "Confirm email", or add a user manually under Authentication -> Users.';
     }
     return error.message;
   };
@@ -128,7 +132,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (
     email: string,
     password: string
-  ): Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean }> => {
+  ): Promise<{ success: boolean; error?: string }> => {
     setAuthError(null);
 
     const trimmedEmail = email.trim();
@@ -161,17 +165,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: formatted };
       }
 
-      // If email confirmation is required, session will be null
-      const requiresEmailConfirmation = !data.session;
       if (data.session) {
         setSession(data.session);
         setUser(data.user);
+        return { success: true };
       }
 
-      return {
-        success: true,
-        requiresEmailConfirmation,
-      };
+      // If session is not returned directly, attempt instant auto-login
+      const { data: loginData, error: loginErr } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (!loginErr && loginData?.session) {
+        setSession(loginData.session);
+        setUser(loginData.user);
+        return { success: true };
+      }
+
+      // If login error occurred due to email confirmation setting in Supabase
+      if (loginErr) {
+        const formatted = formatAuthError(loginErr);
+        setAuthError(formatted);
+        return { success: false, error: formatted };
+      }
+
+      return { success: true };
     } catch (err) {
       const formatted = err instanceof Error ? formatAuthError(err) : 'An unexpected error occurred during sign up.';
       setAuthError(formatted);
