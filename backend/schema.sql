@@ -151,7 +151,7 @@ CREATE TABLE public.session_statistics (
 CREATE INDEX idx_session_statistics_session
     ON public.session_statistics(session_id);
 
-ALTER TABLE public.session_statistics ENABLE ROW LEVEL SECURITY;
+LTER TABLE public.session_statistics ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users manage statistics in own sessions"
 ON public.session_statistics
