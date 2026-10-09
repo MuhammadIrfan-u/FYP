@@ -93,3 +93,83 @@ TO authenticated
 USING (user_id = (SELECT auth.uid()))
 WITH CHECK (user_id = (SELECT auth.uid()));
 
+
+CREATE POLICY "Users manage events in own sessions"
+ON public.session_events
+FOR ALL
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.sessions s
+        WHERE s.id = session_events.session_id
+          AND s.user_id = (SELECT auth.uid())
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1
+        FROM public.sessions s
+        WHERE s.id = session_events.session_id
+          AND s.user_id = (SELECT auth.uid())
+    )
+);
+
+
+
+
+-- Generic statistics for each football session
+CREATE TABLE public.session_statistics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    session_id UUID NOT NULL UNIQUE
+        REFERENCES public.sessions(id) ON DELETE CASCADE,
+
+    -- Store any number of statistics as key-value pairs
+    stats JSONB NOT NULL DEFAULT '{
+        "goals": 0,
+        "shots": 0,
+        "shots_on_target": 0,
+        "shots_off_target": 0,
+        "missed_shots": 0,
+        "passes": 0,
+        "successful_passes": 0,
+        "failed_passes": 0,
+        "dribbles": 0,
+        "sprints": 0,
+        "saves": 0,
+        "interceptions": 0,
+        "tackles": 0,
+        "fouls": 0,
+        "offsides": 0,
+        "possession_percentage": 0
+    }'::JSONB,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_session_statistics_session
+    ON public.session_statistics(session_id);
+
+ALTER TABLE public.session_statistics ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage statistics in own sessions"
+ON public.session_statistics
+FOR ALL
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.sessions s
+        WHERE s.id = session_statistics.session_id
+          AND s.user_id = (SELECT auth.uid())
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1
+        FROM public.sessions s
+        WHERE s.id = session_statistics.session_id
+          AND s.user_id = (SELECT auth.uid())
+    )
+);
