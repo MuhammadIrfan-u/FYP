@@ -17,6 +17,7 @@ import { DetectionBox } from '@/types/football';
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
+  videoUrl?: string;
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
@@ -26,14 +27,18 @@ interface TacticalVideoPlayerProps {
 
 export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   imageSrc = '/match_tactical_frame.jpg',
+  videoUrl,
   matchName = 'FC Dynamo vs Rapid Stars - 1st Half',
   duration = '48:15',
   confidenceThreshold = 0.25,
   onEventClick,
   showTimeline = true,
 }) => {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTimeSec, setCurrentTimeSec] = useState<number>(43); // 00:43
+  const [currentTimeSec, setCurrentTimeSec] = useState<number>(videoUrl ? 0 : 43);
+  const [totalDurationSec, setTotalDurationSec] = useState<number>(2895);
+  const [displayDuration, setDisplayDuration] = useState<string>(duration);
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -48,16 +53,79 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     return box.confidence >= confidenceThreshold;
   });
 
-  // Playback timer simulation
+  // Keep duration synchronized if prop changes
   useEffect(() => {
+    if (duration) {
+      setDisplayDuration(duration);
+    }
+  }, [duration]);
+
+  // When videoUrl changes, reset playback
+  useEffect(() => {
+    if (videoUrl) {
+      setIsPlaying(false);
+      setCurrentTimeSec(0);
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+      }
+    }
+  }, [videoUrl]);
+
+  // Handle Play/Pause
+  const handleTogglePlay = () => {
+    if (videoUrl && videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play().catch((err) => console.warn('Video play error:', err));
+      }
+      setIsPlaying(!isPlaying);
+    } else {
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleSpeedChange = (newSpeed: number) => {
+    setSpeed(newSpeed);
+    if (videoUrl && videoRef.current) {
+      videoRef.current.playbackRate = newSpeed;
+    }
+  };
+
+  const handleSeek = (seconds: number) => {
+    setCurrentTimeSec(seconds);
+    if (videoUrl && videoRef.current) {
+      videoRef.current.currentTime = seconds;
+    }
+  };
+
+  // Playback timer simulation for image-only fallback
+  useEffect(() => {
+    if (videoUrl) return; // real video drives time
     let interval: NodeJS.Timeout;
     if (isPlaying) {
       interval = setInterval(() => {
-        setCurrentTimeSec((prev) => (prev >= 2895 ? 0 : prev + 1));
+        setCurrentTimeSec((prev) => (prev >= totalDurationSec ? 0 : prev + 1));
       }, 1000 / speed);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, speed]);
+  }, [isPlaying, speed, videoUrl, totalDurationSec]);
+
+  const handleVideoTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
+    }
+  };
+
+  const handleVideoLoadedMetadata = () => {
+    if (videoRef.current && videoRef.current.duration) {
+      const dur = Math.floor(videoRef.current.duration);
+      setTotalDurationSec(dur);
+      const m = Math.floor(dur / 60);
+      const s = Math.floor(dur % 60);
+      setDisplayDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+    }
+  };
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
