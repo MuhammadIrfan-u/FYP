@@ -97,6 +97,7 @@ export const AnalysisView: React.FC = () => {
           <div className="xl:col-span-8 space-y-4">
             <TacticalVideoPlayer
               imageSrc={activeVideo.thumbnail || '/match_tactical_frame.jpg'}
+              videoUrl={activeVideo.videoUrl}
               matchName={activeVideo.matchName}
               duration={activeVideo.duration}
               confidenceThreshold={confidenceThreshold}

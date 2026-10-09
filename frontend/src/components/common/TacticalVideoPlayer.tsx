@@ -268,13 +268,25 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
       {/* Main Video Viewport & YOLO Overlays */}
       <div className="relative aspect-video w-full bg-[#1A1A1A] overflow-hidden group select-none">
-        {/* Pitch Frame Image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageSrc}
-          alt="Tactical Video Analysis"
-          className="w-full h-full object-cover"
-        />
+        {videoUrl ? (
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full object-contain"
+            playsInline
+            onTimeUpdate={handleVideoTimeUpdate}
+            onLoadedMetadata={handleVideoLoadedMetadata}
+            onEnded={() => setIsPlaying(false)}
+          />
+        ) : (
+          /* Pitch Frame Image */
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={imageSrc}
+            alt="Tactical Video Analysis"
+            className="w-full h-full object-cover"
+          />
+        )}
 
         {/* Subtle Pitch Scanner Line on playback */}
         {isPlaying && (
@@ -348,25 +360,25 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const percent = (e.clientX - rect.left) / rect.width;
-              setCurrentTimeSec(Math.floor(percent * 2895));
+              handleSeek(Math.floor(percent * (totalDurationSec || 2895)));
             }}
           >
             {/* Filled progress bar */}
             <div
               className="h-full bg-[#262626] transition-all rounded-full"
-              style={{ width: `${(currentTimeSec / 2895) * 100}%` }}
+              style={{ width: `${totalDurationSec > 0 ? (currentTimeSec / totalDurationSec) * 100 : 0}%` }}
             />
           </div>
 
           {/* Timeline Event Markers */}
           {showTimeline &&
             timelineMarkers.map((m, idx) => {
-              const posPercent = (m.sec / 2895) * 100;
+              const posPercent = (m.sec / (totalDurationSec || 2895)) * 100;
               return (
                 <button
                   key={`marker-${idx}`}
                   onClick={() => {
-                    setCurrentTimeSec(m.sec);
+                    handleSeek(m.sec);
                     if (onEventClick) onEventClick(m.label);
                   }}
                   title={m.label}
@@ -389,7 +401,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           <div className="flex items-center gap-3">
             {/* Play/Pause */}
             <button
-              onClick={() => setIsPlaying(!isPlaying)}
+              onClick={handleTogglePlay}
               className="p-2 rounded-lg bg-[#262626] hover:bg-[#171717] text-white transition-all shadow-xs"
               title={isPlaying ? 'Pause' : 'Play'}
             >
@@ -398,7 +410,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
             {/* Restart */}
             <button
-              onClick={() => setCurrentTimeSec(0)}
+              onClick={() => handleSeek(0)}
               className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors"
               title="Reset to 00:00"
             >
@@ -409,7 +421,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             <div className="font-mono text-[#404040] tracking-wider font-semibold">
               <span className="text-[#242424] font-bold">{formatTime(currentTimeSec)}</span>
               <span className="text-[#858585]"> / </span>
-              <span className="text-[#858585]">{duration}</span>
+              <span className="text-[#858585]">{displayDuration}</span>
             </div>
           </div>
 
