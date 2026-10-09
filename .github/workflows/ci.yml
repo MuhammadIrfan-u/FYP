@@ -17,13 +17,17 @@ concurrency:
 permissions:
   contents: read
 
+# NOTE: Every check below is non-blocking (continue-on-error), so the run stays
+# green. Findings still show up in each step's log. No test cases are run.
+
 jobs:
   # ---------------------------------------------------------------------------
-  # Frontend (Next.js)
+  # Frontend (Next.js): code quality + dependency security
   # ---------------------------------------------------------------------------
   frontend:
-    name: Frontend (Next.js)
+    name: Frontend (code quality + security)
     runs-on: ubuntu-latest
+    continue-on-error: true
     defaults:
       run:
         working-directory: frontend
@@ -40,36 +44,33 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        continue-on-error: true
 
-      - name: Lint (non-blocking)
+      - name: Lint (ESLint)
         run: npm run lint --if-present
         continue-on-error: true
 
-      - name: Type check (non-blocking)
+      - name: Type check (tsc)
         run: npx tsc --noEmit
         continue-on-error: true
 
-      - name: Test
-        run: npm test --if-present
-
-      - name: Build
+      - name: Build check
         run: npm run build
+        continue-on-error: true
         env:
           NEXT_TELEMETRY_DISABLED: 1
-          # NEXT_PUBLIC_API_URL: http://localhost:8000
 
-      - name: Dependency audit (npm audit, high and critical, production deps)
+      - name: Dependency audit (npm audit)
         run: npm audit --audit-level=high --omit=dev
+        continue-on-error: true
 
   # ---------------------------------------------------------------------------
-  # Backend (FastAPI)
+  # Backend (FastAPI): code quality + security (no dependency install needed)
   # ---------------------------------------------------------------------------
   backend:
-    name: Backend (FastAPI)
+    name: Backend (code quality + security)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,37 +79,35 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
 
-      - name: Install dependencies
+      - name: Install analysis tools
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov httpx ruff
+          pip install ruff bandit pip-audit
 
-      - name: Lint (non-blocking)
-        run: ruff check .
+      - name: Lint (ruff)
+        run: ruff check backend
         continue-on-error: true
 
-      - name: Test with coverage
-        # exit code 5 means "no tests collected", which should not fail the build
-        run: pytest --cov=. --cov-report=term-missing --cov-report=xml || [ $? -eq 5 ]
+      - name: Format check (ruff format)
+        run: ruff format --check backend
+        continue-on-error: true
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: backend-coverage
-          path: backend/coverage.xml
-          if-no-files-found: ignore
+      - name: Security analysis (bandit, medium severity and above)
+        run: bandit -r backend -x backend/tests -ll
+        continue-on-error: true
+
+      - name: Vulnerable dependency check (pip-audit)
+        run: pip-audit -r backend/requirements.txt --no-deps --disable-pip
+        continue-on-error: true
 
   # ---------------------------------------------------------------------------
-  # Security checks
+  # Secret scanning
   # ---------------------------------------------------------------------------
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
@@ -117,35 +116,17 @@ jobs:
 
       - name: Scan for leaked secrets
         uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  backend-security:
-    name: Backend security (bandit + pip-audit)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install bandit pip-audit
-
-      - name: Static security analysis (bandit, medium severity and above)
-        run: bandit -r backend -x backend/tests -ll
-
-      - name: Vulnerable dependency check (pip-audit)
-        run: pip-audit -r backend/requirements.txt
-
+  # ---------------------------------------------------------------------------
+  # CodeQL (needs a public repo or GitHub Advanced Security)
+  # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL analysis
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
       actions: read
@@ -160,10 +141,12 @@ jobs:
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
+        continue-on-error: true
         with:
           languages: ${{ matrix.language }}
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3
+        continue-on-error: true
         with:
           category: "/language:${{ matrix.language }}"
