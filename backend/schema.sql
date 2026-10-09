@@ -69,3 +69,27 @@ CREATE TABLE public.session_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
+-- 3. Performance indexes
+CREATE INDEX idx_sessions_user_created
+    ON public.sessions(user_id, created_at DESC);
+
+CREATE INDEX idx_session_events_timeline
+    ON public.session_events(session_id, timestamp_seconds);
+
+CREATE INDEX idx_session_events_type
+    ON public.session_events(session_id, event_type);
+
+
+-- 4. Enable Row Level Security
+ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.session_events ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "Users manage own sessions"
+ON public.sessions
+FOR ALL
+TO authenticated
+USING (user_id = (SELECT auth.uid()))
+WITH CHECK (user_id = (SELECT auth.uid()));
+
