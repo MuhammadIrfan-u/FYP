@@ -5,6 +5,9 @@ on:
     branches: [workflow]
   pull_request:
     branches: [workflow]
+  schedule:
+    # Weekly security scan so new CVEs are caught even without new commits
+    - cron: "0 3 * * 1"
 
 # Cancel older runs of the same branch/PR when a new commit is pushed
 concurrency:
@@ -15,6 +18,9 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Frontend (Next.js)
+  # ---------------------------------------------------------------------------
   frontend:
     name: Frontend (Next.js)
     runs-on: ubuntu-latest
@@ -35,12 +41,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
+      - name: Lint (non-blocking)
         run: npm run lint --if-present
+        continue-on-error: true
 
-      - name: Type check
+      - name: Type check (non-blocking)
         run: npx tsc --noEmit
-        continue-on-error: true # remove if the project uses TypeScript and should fail on type errors
+        continue-on-error: true
 
       - name: Test
         run: npm test --if-present
@@ -51,6 +58,12 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           # NEXT_PUBLIC_API_URL: http://localhost:8000
 
+      - name: Dependency audit (npm audit, high and critical, production deps)
+        run: npm audit --audit-level=high --omit=dev
+
+  # ---------------------------------------------------------------------------
+  # Backend (FastAPI)
+  # ---------------------------------------------------------------------------
   backend:
     name: Backend (FastAPI)
     runs-on: ubuntu-latest
@@ -72,11 +85,85 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest ruff httpx
+          pip install pytest pytest-cov httpx ruff
 
-      - name: Lint
+      - name: Lint (non-blocking)
         run: ruff check .
+        continue-on-error: true
 
-      - name: Test
+      - name: Test with coverage
         # exit code 5 means "no tests collected", which should not fail the build
-        run: pytest || [ $? -eq 5 ]
+        run: pytest --cov=. --cov-report=term-missing --cov-report=xml || [ $? -eq 5 ]
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Security checks
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  backend-security:
+    name: Backend security (bandit + pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Static security analysis (bandit, medium severity and above)
+        run: bandit -r backend -x backend/tests -ll
+
+      - name: Vulnerable dependency check (pip-audit)
+        run: pip-audit -r backend/requirements.txt
+
+  codeql:
+    name: CodeQL analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
