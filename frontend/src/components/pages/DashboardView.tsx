@@ -19,7 +19,7 @@ import { KpiCard } from '@/components/common/KpiCard';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 
 export const DashboardView: React.FC = () => {
-  const { setActivePage, activeVideo, settings } = useFootball();
+  const { setActivePage, activeVideo, settings, videos } = useFootball();
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -88,11 +88,11 @@ export const DashboardView: React.FC = () => {
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <KpiCard
           title="Total Sessions"
-          value="12"
+          value={videos.length.toString()}
           icon={Calendar}
-          change="+3 sessions"
+          change={`${videos.length} uploaded`}
           isPositive={true}
-          supportingText="vs. last month"
+          supportingText="database sessions"
           accentColor="blue"
         />
 
