@@ -156,7 +156,7 @@ export const AnalysisView: React.FC = () => {
           liveDetections.length) *
         100
       ).toFixed(1)
-    : '91.4';
+    : '0.0';
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -536,7 +536,7 @@ export const AnalysisView: React.FC = () => {
               Players on Pitch
             </span>
             <span className="text-2xl font-black mt-1 block text-[#2563EB]">
-              {liveClassCounts.player || 22}
+              {liveClassCounts.player}
             </span>
             <span className="text-[11px] text-[#858585] mt-1 block">
               YOLO bounding boxes
