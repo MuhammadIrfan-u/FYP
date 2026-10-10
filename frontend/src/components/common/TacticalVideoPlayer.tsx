@@ -206,7 +206,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     }
 
     return () => {
-      if (intervalId) clearIntervalId(intervalId);
+      if (intervalId) clearInterval(intervalId);
     };
   }, [isPlaying, currentTimeSec, runFrameInference, syncTimelineDetections]);
 
