@@ -1,5 +1,3 @@
-import os
-import io
 import time
 import uuid
 import shutil
@@ -7,14 +5,12 @@ import base64
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 import cv2
 import numpy as np
-from PIL import Image
 from ultralytics import YOLO
 
 # Paths
