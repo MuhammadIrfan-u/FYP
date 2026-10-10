@@ -173,3 +173,93 @@ WITH CHECK (
           AND s.user_id = (SELECT auth.uid())
     )
 );
+
+
+-- ==============================================================================
+-- 6. Storage Bucket & Row Level Security Policies
+-- ==============================================================================
+
+-- Create private storage bucket for football videos (2GB limit)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'football-videos',
+    'football-videos',
+    false,
+    2147483648,
+    ARRAY['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm']
+)
+ON CONFLICT (id) DO UPDATE SET
+    public = false,
+    file_size_limit = 2147483648,
+    allowed_mime_types = ARRAY['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm'];
+
+-- Storage RLS: Users upload only into their own folder (auth.uid() = USER_UUID)
+CREATE POLICY "Users can upload own videos"
+ON storage.objects
+FOR INSERT
+TO authenticated
+WITH CHECK (
+    bucket_id = 'football-videos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Storage RLS: Users view only their own video objects
+CREATE POLICY "Users can view own videos"
+ON storage.objects
+FOR SELECT
+TO authenticated
+USING (
+    bucket_id = 'football-videos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Storage RLS: Users delete only their own video objects
+CREATE POLICY "Users can delete own videos"
+ON storage.objects
+FOR DELETE
+TO authenticated
+USING (
+    bucket_id = 'football-videos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+-- Storage RLS: Users update only their own video objects
+CREATE POLICY "Users can update own videos"
+ON storage.objects
+FOR UPDATE
+TO authenticated
+USING (
+    bucket_id = 'football-videos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+)
+WITH CHECK (
+    bucket_id = 'football-videos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+);
+
+
+-- ==============================================================================
+-- 7. Remove Email Confirmation Requirement & Auto-Confirm All Users
+-- ==============================================================================
+
+-- Auto-confirm any existing unconfirmed users
+UPDATE auth.users
+SET email_confirmed_at = NOW(), confirmed_at = NOW()
+WHERE email_confirmed_at IS NULL;
+
+-- Automatically mark any future user as confirmed upon creation
+CREATE OR REPLACE FUNCTION public.auto_confirm_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.email_confirmed_at = COALESCE(NEW.email_confirmed_at, NOW());
+    NEW.confirmed_at = COALESCE(NEW.confirmed_at, NOW());
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_auto_confirm ON auth.users;
+CREATE TRIGGER on_auth_user_created_auto_confirm
+BEFORE INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.auto_confirm_new_user();
+

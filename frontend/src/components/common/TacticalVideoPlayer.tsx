@@ -17,6 +17,7 @@ import { DetectionBox } from '@/types/football';
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
+  videoUrl?: string;
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
@@ -26,14 +27,18 @@ interface TacticalVideoPlayerProps {
 
 export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   imageSrc = '/match_tactical_frame.jpg',
+  videoUrl,
   matchName = 'FC Dynamo vs Rapid Stars - 1st Half',
   duration = '48:15',
   confidenceThreshold = 0.25,
   onEventClick,
   showTimeline = true,
 }) => {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTimeSec, setCurrentTimeSec] = useState<number>(43); // 00:43
+  const [currentTimeSec, setCurrentTimeSec] = useState<number>(videoUrl ? 0 : 43);
+  const [totalDurationSec, setTotalDurationSec] = useState<number>(2895);
+  const [displayDuration, setDisplayDuration] = useState<string>(duration);
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -48,16 +53,79 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     return box.confidence >= confidenceThreshold;
   });
 
-  // Playback timer simulation
+  // Keep duration synchronized if prop changes
   useEffect(() => {
+    if (duration) {
+      setDisplayDuration(duration);
+    }
+  }, [duration]);
+
+  // When videoUrl changes, reset playback
+  useEffect(() => {
+    if (videoUrl) {
+      setIsPlaying(false);
+      setCurrentTimeSec(0);
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+      }
+    }
+  }, [videoUrl]);
+
+  // Handle Play/Pause
+  const handleTogglePlay = () => {
+    if (videoUrl && videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play().catch((err) => console.warn('Video play error:', err));
+      }
+      setIsPlaying(!isPlaying);
+    } else {
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleSpeedChange = (newSpeed: number) => {
+    setSpeed(newSpeed);
+    if (videoUrl && videoRef.current) {
+      videoRef.current.playbackRate = newSpeed;
+    }
+  };
+
+  const handleSeek = (seconds: number) => {
+    setCurrentTimeSec(seconds);
+    if (videoUrl && videoRef.current) {
+      videoRef.current.currentTime = seconds;
+    }
+  };
+
+  // Playback timer simulation for image-only fallback
+  useEffect(() => {
+    if (videoUrl) return; // real video drives time
     let interval: NodeJS.Timeout;
     if (isPlaying) {
       interval = setInterval(() => {
-        setCurrentTimeSec((prev) => (prev >= 2895 ? 0 : prev + 1));
+        setCurrentTimeSec((prev) => (prev >= totalDurationSec ? 0 : prev + 1));
       }, 1000 / speed);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, speed]);
+  }, [isPlaying, speed, videoUrl, totalDurationSec]);
+
+  const handleVideoTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
+    }
+  };
+
+  const handleVideoLoadedMetadata = () => {
+    if (videoRef.current && videoRef.current.duration) {
+      const dur = Math.floor(videoRef.current.duration);
+      setTotalDurationSec(dur);
+      const m = Math.floor(dur / 60);
+      const s = Math.floor(dur % 60);
+      setDisplayDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+    }
+  };
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -200,13 +268,25 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
       {/* Main Video Viewport & YOLO Overlays */}
       <div className="relative aspect-video w-full bg-[#1A1A1A] overflow-hidden group select-none">
-        {/* Pitch Frame Image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageSrc}
-          alt="Tactical Video Analysis"
-          className="w-full h-full object-cover"
-        />
+        {videoUrl ? (
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full object-contain"
+            playsInline
+            onTimeUpdate={handleVideoTimeUpdate}
+            onLoadedMetadata={handleVideoLoadedMetadata}
+            onEnded={() => setIsPlaying(false)}
+          />
+        ) : (
+          /* Pitch Frame Image */
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={imageSrc}
+            alt="Tactical Video Analysis"
+            className="w-full h-full object-cover"
+          />
+        )}
 
         {/* Subtle Pitch Scanner Line on playback */}
         {isPlaying && (
@@ -280,25 +360,25 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const percent = (e.clientX - rect.left) / rect.width;
-              setCurrentTimeSec(Math.floor(percent * 2895));
+              handleSeek(Math.floor(percent * (totalDurationSec || 2895)));
             }}
           >
             {/* Filled progress bar */}
             <div
               className="h-full bg-[#262626] transition-all rounded-full"
-              style={{ width: `${(currentTimeSec / 2895) * 100}%` }}
+              style={{ width: `${totalDurationSec > 0 ? (currentTimeSec / totalDurationSec) * 100 : 0}%` }}
             />
           </div>
 
           {/* Timeline Event Markers */}
           {showTimeline &&
             timelineMarkers.map((m, idx) => {
-              const posPercent = (m.sec / 2895) * 100;
+              const posPercent = (m.sec / (totalDurationSec || 2895)) * 100;
               return (
                 <button
                   key={`marker-${idx}`}
                   onClick={() => {
-                    setCurrentTimeSec(m.sec);
+                    handleSeek(m.sec);
                     if (onEventClick) onEventClick(m.label);
                   }}
                   title={m.label}
@@ -321,7 +401,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           <div className="flex items-center gap-3">
             {/* Play/Pause */}
             <button
-              onClick={() => setIsPlaying(!isPlaying)}
+              onClick={handleTogglePlay}
               className="p-2 rounded-lg bg-[#262626] hover:bg-[#171717] text-white transition-all shadow-xs"
               title={isPlaying ? 'Pause' : 'Play'}
             >
@@ -330,7 +410,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
             {/* Restart */}
             <button
-              onClick={() => setCurrentTimeSec(0)}
+              onClick={() => handleSeek(0)}
               className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors"
               title="Reset to 00:00"
             >
@@ -341,7 +421,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             <div className="font-mono text-[#404040] tracking-wider font-semibold">
               <span className="text-[#242424] font-bold">{formatTime(currentTimeSec)}</span>
               <span className="text-[#858585]"> / </span>
-              <span className="text-[#858585]">{duration}</span>
+              <span className="text-[#858585]">{displayDuration}</span>
             </div>
           </div>
 

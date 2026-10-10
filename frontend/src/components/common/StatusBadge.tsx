@@ -24,6 +24,18 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
         </span>
       );
 
+    case 'Uploaded':
+      return (
+        <span
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-full bg-[#0284C7]/10 text-[#0284C7] border border-[#0284C7]/30 ${
+            isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs tracking-wide'
+          }`}
+        >
+          <CheckCircle2 className={isSm ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
+          Uploaded
+        </span>
+      );
+
     case 'Processing':
       return (
         <span

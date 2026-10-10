@@ -23,7 +23,7 @@ export interface DetectionBox {
   trail?: Array<[number, number]>;
 }
 
-export type VideoStatus = 'Uploading' | 'Processing' | 'Analysing' | 'Completed' | 'Failed';
+export type VideoStatus = 'Uploading' | 'Processing' | 'Analysing' | 'Completed' | 'Failed' | 'Uploaded';
 
 export interface MatchVideo {
   id: string;
@@ -48,6 +48,10 @@ export interface MatchVideo {
     dribbles: number;
     sprints: number;
   };
+  videoPath?: string;
+  videoUrl?: string;
+  userId?: string;
+  rawDurationSeconds?: number;
 }
 
 export interface PlayerStats {
