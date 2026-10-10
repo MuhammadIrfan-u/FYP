@@ -12,7 +12,6 @@ import {
   Zap,
   AlertCircle,
 } from 'lucide-react';
-import { INITIAL_DETECTION_BOXES } from '@/lib/mockData';
 import { DetectionBox } from '@/types/football';
 import { analyzeFrameWithYOLO, YOLODetectionItem } from '@/lib/yoloApi';
 
@@ -62,8 +61,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   // Video element playback & error state
   const [videoHasError, setVideoHasError] = useState<boolean>(false);
 
-  // Active detections rendered over video
-  const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>(INITIAL_DETECTION_BOXES);
+  // Active detections rendered over video (populated dynamically by YOLO model)
+  const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>([]);
   const [isInferencing, setIsInferencing] = useState<boolean>(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
@@ -78,6 +77,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   // Reset when videoUrl changes
   useEffect(() => {
     setVideoHasError(false);
+    setCurrentBoxes([]);
     if (videoUrl) {
       setIsPlaying(false);
       setCurrentTimeSec(0);
