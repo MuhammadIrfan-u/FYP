@@ -21,6 +21,7 @@ export const UploadView: React.FC = () => {
     uploadFootballVideo,
     deleteSession,
     playSession,
+    setActivePage,
     isUploading,
     uploadProgress,
     refreshSessions,

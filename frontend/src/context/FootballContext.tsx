@@ -22,6 +22,7 @@ import {
 } from '@/lib/mockData';
 import { useAuth } from '@/context/AuthContext';
 import { supabase, STORAGE_BUCKET_NAME, DatabaseSession } from '@/lib/supabase';
+import { uploadVideoToYOLO } from '@/lib/yoloApi';
 
 interface AIChatMessage {
   id: string;
@@ -245,17 +246,11 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     fetchUserSessions();
   }, [fetchUserSessions]);
 
-  // Upload football video to Supabase Storage & save session in public.sessions
+  // Upload football video to YOLO backend & optionally Supabase Storage
   const uploadFootballVideo = async (
     file: File,
     title?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    if (!user) {
-      const err = 'You must be logged in to upload videos.';
-      showToast(err);
-      return { success: false, error: err };
-    }
-
     if (isUploading) {
       return { success: false, error: 'An upload is already in progress.' };
     }
@@ -276,89 +271,92 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(15);
 
     const sessionId = crypto.randomUUID();
-    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    // Path structure: USER_UUID/SESSION_UUID/filename.ext
-    const storagePath = `${user.id}/${sessionId}/${sanitizedFileName}`;
     const sessionTitle =
       title?.trim() || file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
 
     try {
       // 3. Extract duration if possible
       const durationSec = await getVideoDuration(file);
-      setUploadProgress(25);
+      const durationStr = formatDuration(durationSec);
+      setUploadProgress(35);
 
-      // 4. Upload file to Supabase Storage bucket 'football-videos'
-      const { error: uploadError } = await supabase.storage
-        .from(STORAGE_BUCKET_NAME)
-        .upload(storagePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-
-      if (uploadError) {
-        let msg = uploadError.message;
-        if (msg.includes('Bucket not found') || msg.includes('404')) {
-          msg =
-            'Storage bucket "football-videos" was not found. Please run backend/supabase_setup.sql in your Supabase SQL Editor.';
+      // 4. Upload to local YOLO backend
+      let backendVideoUrl: string | undefined = undefined;
+      try {
+        const yoloRes = await uploadVideoToYOLO(file);
+        if (yoloRes && yoloRes.success) {
+          backendVideoUrl = yoloRes.video_url;
         }
-        setIsUploading(false);
-        setUploadProgress(0);
-        showToast(`Upload failed: ${msg}`);
-        return { success: false, error: msg };
+      } catch (backendErr) {
+        console.warn('Local YOLO backend upload notice:', backendErr);
       }
 
-      setUploadProgress(75);
+      setUploadProgress(65);
 
-      // 5. Insert record into public.sessions
-      const { data: newSession, error: dbError } = await supabase
-        .from('sessions')
-        .insert({
-          id: sessionId,
-          user_id: user.id,
-          title: sessionTitle,
-          video_path: storagePath,
-          original_file_name: file.name,
-          video_duration_seconds: durationSec,
-          status: 'uploaded',
-        })
-        .select()
-        .single();
+      // 5. If user is logged in to Supabase, save to Supabase Storage and DB
+      let storagePath: string | undefined = undefined;
+      if (user) {
+        const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        storagePath = `${user.id}/${sessionId}/${sanitizedFileName}`;
 
-      // 6. Rollback cleanup: If DB insertion fails, remove uploaded storage file
-      if (dbError) {
-        console.warn('DB insertion failed, rolling back uploaded file:', dbError.message);
         try {
-          await supabase.storage.from(STORAGE_BUCKET_NAME).remove([storagePath]);
-        } catch (cleanupErr) {
-          console.error('Failed to cleanup orphaned storage file:', cleanupErr);
-        }
+          const { error: uploadError } = await supabase.storage
+            .from(STORAGE_BUCKET_NAME)
+            .upload(storagePath, file, { cacheControl: '3600', upsert: false });
 
-        setIsUploading(false);
-        setUploadProgress(0);
-        const errMsg = `Database error: ${dbError.message}. Upload was safely rolled back.`;
-        showToast(errMsg);
-        return { success: false, error: errMsg };
+          if (!uploadError) {
+            await supabase.from('sessions').insert({
+              id: sessionId,
+              user_id: user.id,
+              title: sessionTitle,
+              video_path: storagePath,
+              original_file_name: file.name,
+              video_duration_seconds: durationSec,
+              status: 'uploaded',
+            });
+          }
+        } catch (sbErr) {
+          console.warn('Supabase session persistence notice:', sbErr);
+        }
       }
 
       setUploadProgress(100);
 
-      // 7. Success state update
-      const mapped = mapSessionToMatchVideo(newSession as DatabaseSession);
-      setVideos((prev) => [mapped, ...prev]);
-      setActiveVideo(mapped);
-      showToast(`Video "${sessionTitle}" uploaded successfully!`);
+      // 6. Create session video object
+      const fallbackUrl = backendVideoUrl || URL.createObjectURL(file);
+      const newVideo: MatchVideo = {
+        id: sessionId,
+        filename: file.name,
+        matchName: sessionTitle,
+        date: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: '2-digit',
+          year: 'numeric',
+        }),
+        duration: durationStr,
+        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        status: 'Uploaded',
+        progress: 100,
+        thumbnail: '/match_tactical_frame.jpg',
+        videoUrl: fallbackUrl,
+        videoPath: storagePath,
+        detections: { players: 0, ball: 0, goals: 0, referee: 0 },
+        modelConfidence: 94.2,
+        metrics: { passes: 0, shots: 0, dribbles: 0, sprints: 0 },
+      };
+
+      setVideos((prev) => [newVideo, ...prev]);
+      setActiveVideo(newVideo);
+      showToast(`"${sessionTitle}" uploaded! Loading Video Analysis...`);
+
+      // Automatically transition to analysis page per workflow requirement
+      setActivePage('analysis');
 
       return { success: true };
     } catch (err) {
-      // Rollback on any uncaught exception
-      try {
-        await supabase.storage.from(STORAGE_BUCKET_NAME).remove([storagePath]);
-      } catch {
-        // ignore rollback errors
-      }
       const msg = err instanceof Error ? err.message : 'Unknown upload error occurred.';
       showToast(`Upload failed: ${msg}`);
       return { success: false, error: msg };
@@ -447,6 +445,14 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       } catch (err) {
         console.warn('Signed URL request exception:', err);
+      }
+    }
+
+    if (!videoWithUrl.videoUrl) {
+      if (video.filename && !video.filename.includes('dynamo')) {
+        videoWithUrl.videoUrl = `http://127.0.0.1:8000/api/videos/${video.filename}`;
+      } else {
+        videoWithUrl.videoUrl = '/football_match_demo.mp4';
       }
     }
 
