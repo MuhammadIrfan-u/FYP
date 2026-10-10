@@ -59,7 +59,7 @@ export interface MatchVideo {
     [key: string]: number | undefined;
   };
   modelConfidence: number;
-  timeline?: Record<string, any>;
+  timeline?: Record<string, unknown>;
   metrics: {
     passes: number;
     shots: number;
