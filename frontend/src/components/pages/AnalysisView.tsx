@@ -109,7 +109,7 @@ export const AnalysisView: React.FC = () => {
       if (res && res.success) {
         setTimelineData(res.timeline);
         setBatchProgressMsg(null);
-        showToast(`Analyzed ${res.frames_analyzed} frames with model best_5.pt!`);
+        showToast(`Analyzed ${res.frames_analyzed} frames with model ${modelName}!`);
       }
     } catch (err: unknown) {
       setBatchProgressMsg(null);
@@ -123,7 +123,7 @@ export const AnalysisView: React.FC = () => {
   // Export detections JSON
   const handleExportJSON = () => {
     const payload = {
-      model: 'best_5.pt',
+      model: modelName,
       session: activeVideo.matchName,
       video: activeVideo.filename,
       timestamp: new Date().toISOString(),
@@ -191,7 +191,7 @@ export const AnalysisView: React.FC = () => {
             />
             <span className="font-medium">
               {modelStatus === 'ready'
-                ? 'Model: best_5.pt (Ready)'
+                ? `Model: ${modelName} (Ready)`
                 : modelStatus === 'offline'
                 ? 'Backend Offline'
                 : 'Connecting to Model...'}
@@ -219,7 +219,7 @@ export const AnalysisView: React.FC = () => {
             </span>
           </div>
           <span className="text-[11px] font-mono font-bold text-[#15803D] hidden sm:inline">
-            YOLOv11 • best_5.pt
+            YOLOv11 • {modelName}
           </span>
         </div>
       )}
@@ -235,6 +235,7 @@ export const AnalysisView: React.FC = () => {
             duration={activeVideo.duration}
             confidenceThreshold={confidenceThreshold}
             timeline={timelineData}
+            modelName={modelName}
             showTimeline={true}
             onDetectionsUpdate={handleDetectionsUpdate}
             onPlayStateChange={setIsPlaying}
