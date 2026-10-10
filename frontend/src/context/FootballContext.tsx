@@ -429,7 +429,7 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Open a session and play via short-lived signed URL
   const playSession = async (video: MatchVideo) => {
-    let videoWithUrl: MatchVideo = { ...video };
+    const videoWithUrl: MatchVideo = { ...video };
 
     if (video.videoPath) {
       try {

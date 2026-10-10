@@ -1,16 +1,16 @@
+import base64
+import shutil
 import time
 import uuid
-import shutil
-import base64
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+import cv2
+import numpy as np
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import cv2
-import numpy as np
 from ultralytics import YOLO
 
 # Paths
@@ -23,7 +23,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="FootballCoach PRO - YOLO Analytics Engine",
     version="1.0.0",
-    description="Real-time tactical football video analysis using trained YOLO model best_5.pt"
+    description="Real-time tactical football video analysis using trained YOLO model best_5.pt",
 )
 
 # Enable CORS for frontend
@@ -47,25 +47,32 @@ try:
     MODEL_LOADED = True
     MODEL_CLASSES = model.names
     print(f"Model successfully loaded! Detected classes: {MODEL_CLASSES}")
-except Exception as e:
+except Exception as e:  # noqa: BLE001
     print(f"Failed to load YOLO model: {e}")
     model = None
     MODEL_LOADED = False
-    MODEL_CLASSES = {0: "football", 1: "football goal", 2: "player", 3: "player with ball"}
+    MODEL_CLASSES = {
+        0: "football",
+        1: "football goal",
+        2: "player",
+        3: "player with ball",
+    }
+
 
 class FrameAnalysisRequest(BaseModel):
     image: str  # Base64 data URL or raw base64
-    confidence_threshold: Optional[float] = 0.25
+    confidence_threshold: float | None = 0.25
 
-def parse_detections(results, conf_threshold: float = 0.25) -> Dict[str, Any]:
+
+def parse_detections(results, conf_threshold: float = 0.25) -> dict[str, Any]:
     detections = []
     class_counts = {
         "player": 0,
         "football": 0,
         "football goal": 0,
-        "player with ball": 0
+        "player with ball": 0,
     }
-    
+
     if not results or len(results) == 0:
         return {"detections": detections, "class_counts": class_counts}
 
@@ -78,10 +85,12 @@ def parse_detections(results, conf_threshold: float = 0.25) -> Dict[str, Any]:
         conf = float(box.conf[0])
         if conf < conf_threshold:
             continue
-            
+
         cls_id = int(box.cls[0])
-        cls_name = model.names.get(cls_id, f"class_{cls_id}") if model else f"class_{cls_id}"
-        
+        cls_name = (
+            model.names.get(cls_id, f"class_{cls_id}") if model else f"class_{cls_id}"
+        )
+
         # Count classes
         if cls_name in class_counts:
             class_counts[cls_name] += 1
@@ -91,36 +100,37 @@ def parse_detections(results, conf_threshold: float = 0.25) -> Dict[str, Any]:
         # Normalized coordinates: [cx, cy, w, h] (0 to 1)
         xywhn = box.xywhn[0].tolist()
         cx, cy, w, h = xywhn[0], xywhn[1], xywhn[2], xywhn[3]
-        
+
         # Convert to percentage [left_pct, top_pct, width_pct, height_pct]
         x_pct = max(0.0, min(100.0, (cx - (w / 2.0)) * 100.0))
         y_pct = max(0.0, min(100.0, (cy - (h / 2.0)) * 100.0))
         w_pct = max(0.0, min(100.0, w * 100.0))
         h_pct = max(0.0, min(100.0, h * 100.0))
 
-        detections.append({
-            "id": f"det-{idx}-{int(time.time()*1000)%100000}",
-            "class": cls_name,
-            "label": cls_name.capitalize(),
-            "confidence": round(conf, 3),
-            "x": round(x_pct, 2),
-            "y": round(y_pct, 2),
-            "w": round(w_pct, 2),
-            "h": round(h_pct, 2)
-        })
+        detections.append(
+            {
+                "id": f"det-{idx}-{int(time.time() * 1000) % 100000}",
+                "class": cls_name,
+                "label": cls_name.capitalize(),
+                "confidence": round(conf, 3),
+                "x": round(x_pct, 2),
+                "y": round(y_pct, 2),
+                "w": round(w_pct, 2),
+                "h": round(h_pct, 2),
+            }
+        )
 
-    return {
-        "detections": detections,
-        "class_counts": class_counts
-    }
+    return {"detections": detections, "class_counts": class_counts}
+
 
 @app.get("/")
 def root():
     return {
         "message": "FootballCoach PRO YOLO Analytics API is active",
         "model_loaded": MODEL_LOADED,
-        "classes": MODEL_CLASSES
+        "classes": MODEL_CLASSES,
     }
+
 
 @app.get("/api/model-info")
 def get_model_info():
@@ -128,8 +138,9 @@ def get_model_info():
         "status": "ready" if MODEL_LOADED else "error",
         "model_file": "best_5.pt",
         "classes": MODEL_CLASSES,
-        "default_confidence": 0.25
+        "default_confidence": 0.25,
     }
+
 
 @app.post("/api/analyze-frame")
 async def analyze_frame(raw_request: Request):
@@ -159,8 +170,10 @@ async def analyze_frame(raw_request: Request):
             img_bytes = base64.b64decode(b64_data)
             nparr = np.frombuffer(img_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to decode base64 JSON frame: {str(e)}")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400, detail=f"Failed to decode base64 JSON frame: {e!s}"
+            )
 
     elif "multipart/form-data" in content_type:
         try:
@@ -173,8 +186,10 @@ async def analyze_frame(raw_request: Request):
                 contents = await file_field.read()
                 nparr = np.frombuffer(contents, np.uint8)
                 img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to decode multipart file: {str(e)}")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400, detail=f"Failed to decode multipart file: {e!s}"
+            )
 
     else:
         # Fallback: attempt JSON decoding
@@ -189,11 +204,15 @@ async def analyze_frame(raw_request: Request):
             img_bytes = base64.b64decode(b64_data)
             nparr = np.frombuffer(img_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid payload format: {str(e)}")
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400, detail=f"Invalid payload format: {e!s}"
+            )
 
     if img_bgr is None or img_bgr.size == 0:
-        raise HTTPException(status_code=400, detail="Invalid or empty image decoded from frame.")
+        raise HTTPException(
+            status_code=400, detail="Invalid or empty image decoded from frame."
+        )
 
     # Run YOLO inference
     results = model(img_bgr, conf=confidence_threshold, verbose=False)
@@ -205,11 +224,12 @@ async def analyze_frame(raw_request: Request):
         "detections": parsed["detections"],
         "class_counts": parsed["class_counts"],
         "total_detections": len(parsed["detections"]),
-        "inference_time_ms": elapsed_ms
+        "inference_time_ms": elapsed_ms,
     }
 
+
 @app.post("/api/upload")
-async def upload_video(file: UploadFile = File(...)):
+def upload_video(file: UploadFile = File(...)):  # noqa: B008
     """Upload a football video and return access URL and metadata"""
     try:
         file_ext = Path(file.filename).suffix.lower() or ".mp4"
@@ -238,17 +258,18 @@ async def upload_video(file: UploadFile = File(...)):
             "duration": duration_sec,
             "fps": round(fps, 1),
             "resolution": f"{width}x{height}",
-            "size_bytes": destination.stat().st_size
+            "size_bytes": destination.stat().st_size,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Video upload failed: {str(e)}")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Video upload failed: {e!s}")
+
 
 @app.post("/api/analyze-video")
-async def analyze_video(
-    file: Optional[UploadFile] = File(None),
-    video_filename: Optional[str] = Form(None),
+def analyze_video(
+    file: UploadFile | None = File(None),  # noqa: B008
+    video_filename: str | None = Form(None),
     sample_fps: float = Form(2.0),
-    confidence_threshold: float = Form(0.25)
+    confidence_threshold: float = Form(0.25),
 ):
     """Analyze a football video file by sampling frames at specified rate (default: 2 frames per sec)"""
     if not MODEL_LOADED or model is None:
@@ -265,9 +286,13 @@ async def analyze_video(
     elif video_filename:
         video_path = UPLOADS_DIR / video_filename
         if not video_path.exists():
-            raise HTTPException(status_code=404, detail="Specified video file not found.")
+            raise HTTPException(
+                status_code=404, detail="Specified video file not found."
+            )
     else:
-        raise HTTPException(status_code=400, detail="Provide either a video file or video_filename.")
+        raise HTTPException(
+            status_code=400, detail="Provide either a video file or video_filename."
+        )
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -278,10 +303,15 @@ async def analyze_video(
     duration_sec = total_frames / video_fps if video_fps > 0 else 0.0
 
     # Calculate step in frames
-    step_frames = max(1, int(round(video_fps / sample_fps)))
-    
+    step_frames = max(1, round(video_fps / sample_fps))
+
     timeline = {}
-    aggregated_counts = {"player": 0, "football": 0, "football goal": 0, "player with ball": 0}
+    aggregated_counts = {
+        "player": 0,
+        "football": 0,
+        "football goal": 0,
+        "player with ball": 0,
+    }
     max_counts = {"player": 0, "football": 0, "football goal": 0, "player with ball": 0}
     frames_analyzed = 0
     curr_frame_idx = 0
@@ -295,18 +325,17 @@ async def analyze_video(
             timestamp = round(curr_frame_idx / video_fps, 2)
             results = model(frame, conf=confidence_threshold, verbose=False)
             parsed = parse_detections(results, conf_threshold=confidence_threshold)
-            
+
             timeline[f"{timestamp:.2f}"] = {
                 "timestamp": timestamp,
                 "detections": parsed["detections"],
-                "counts": parsed["class_counts"]
+                "counts": parsed["class_counts"],
             }
 
             for k, v in parsed["class_counts"].items():
                 if k in aggregated_counts:
                     aggregated_counts[k] += v
-                    if v > max_counts[k]:
-                        max_counts[k] = v
+                    max_counts[k] = max(max_counts[k], v)
 
             frames_analyzed += 1
 
@@ -328,9 +357,11 @@ async def analyze_video(
         "frames_analyzed": frames_analyzed,
         "timeline": timeline,
         "peak_class_counts": max_counts,
-        "avg_class_counts": avg_counts
+        "avg_class_counts": avg_counts,
     }
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

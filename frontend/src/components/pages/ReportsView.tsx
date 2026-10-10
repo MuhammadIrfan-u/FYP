@@ -6,12 +6,6 @@ import {
   Download,
   Eye,
   Plus,
-  Filter,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  ArrowRight,
-  HardDrive,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
@@ -183,7 +177,7 @@ export const ReportsView: React.FC = () => {
               </label>
               <select
                 value={reportType}
-                onChange={(e) => setReportType(e.target.value as any)}
+                onChange={(e) => setReportType(e.target.value as 'Match Report' | 'Player Report' | 'Team Performance')}
                 className="w-full bg-[#FBFAF7] border border-[#E8E3D8] rounded-xl px-3.5 py-2 text-xs text-[#242424] focus:outline-none focus:border-[#262626]"
               >
                 <option value="Match Report">Match Report</option>

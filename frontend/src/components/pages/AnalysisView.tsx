@@ -6,20 +6,16 @@ import {
   Download,
   Upload,
   RefreshCw,
-  Sparkles,
   Sliders,
-  CheckCircle2,
-  AlertCircle,
   Play,
   Film,
   Layers,
-  CircleDot,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 import { DetectionBox } from '@/types/football';
-import { analyzeVideoWithYOLO, checkYOLOStatus } from '@/lib/yoloApi';
+import { analyzeVideoWithYOLO, checkYOLOStatus, YOLOTimeline } from '@/lib/yoloApi';
 
 export const AnalysisView: React.FC = () => {
   const {
@@ -32,12 +28,6 @@ export const AnalysisView: React.FC = () => {
 
   // Model connection status
   const [modelStatus, setModelStatus] = useState<'checking' | 'ready' | 'offline'>('checking');
-  const [modelClasses, setModelClasses] = useState<Record<string, string>>({
-    '0': 'football',
-    '1': 'football goal',
-    '2': 'player',
-    '3': 'player with ball',
-  });
 
   // Real-time detection state updated during video playback
   const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([]);
@@ -56,8 +46,8 @@ export const AnalysisView: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState<boolean>(false);
   const [batchProgressMsg, setBatchProgressMsg] = useState<string | null>(null);
-  const [timelineData, setTimelineData] = useState<Record<string, any> | undefined>(
-    activeVideo.timeline
+  const [timelineData, setTimelineData] = useState<YOLOTimeline | undefined>(
+    activeVideo.timeline as YOLOTimeline | undefined
   );
 
   // Check YOLO backend connectivity
@@ -67,7 +57,6 @@ export const AnalysisView: React.FC = () => {
       if (mounted) {
         if (status.ready) {
           setModelStatus('ready');
-          if (status.classes) setModelClasses(status.classes);
         } else {
           setModelStatus('offline');
         }
@@ -81,7 +70,7 @@ export const AnalysisView: React.FC = () => {
   // Update timeline if active video changes
   useEffect(() => {
     if (activeVideo.timeline) {
-      setTimelineData(activeVideo.timeline);
+      setTimelineData(activeVideo.timeline as YOLOTimeline);
     }
   }, [activeVideo]);
 
@@ -118,9 +107,10 @@ export const AnalysisView: React.FC = () => {
         setBatchProgressMsg(null);
         showToast(`Analyzed ${res.frames_analyzed} frames with model best_5.pt!`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setBatchProgressMsg(null);
-      showToast(`Batch analysis notice: ${err.message || 'Check video format'}`);
+      const errMsg = err instanceof Error ? err.message : 'Check video format';
+      showToast(`Batch analysis notice: ${errMsg}`);
     } finally {
       setIsBatchAnalyzing(false);
     }

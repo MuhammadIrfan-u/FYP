@@ -18,20 +18,20 @@ import { useFootball } from '@/context/FootballContext';
 import { KpiCard } from '@/components/common/KpiCard';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 
+const SectionDivider = ({ label }: { label: string }) => (
+  <div className="flex items-center gap-4 -mb-6">
+    <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
+      {label}
+    </span>
+    <div className="flex-1 h-px bg-gradient-to-r from-[#D9D3C5] via-[#E8E3D8] to-transparent" />
+  </div>
+);
+
 export const DashboardView: React.FC = () => {
   const { setActivePage, activeVideo, settings, videos } = useFootball();
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-
-  const SectionDivider = ({ label }: { label: string }) => (
-    <div className="flex items-center gap-4 -mb-6">
-      <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
-        {label}
-      </span>
-      <div className="flex-1 h-px bg-gradient-to-r from-[#D9D3C5] via-[#E8E3D8] to-transparent" />
-    </div>
-  );
 
   return (
     <div className="space-y-12 animate-in fade-in duration-200">

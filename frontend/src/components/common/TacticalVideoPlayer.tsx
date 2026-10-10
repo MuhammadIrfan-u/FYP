@@ -12,8 +12,8 @@ import {
   Zap,
   AlertCircle,
 } from 'lucide-react';
-import { DetectionBox } from '@/types/football';
-import { analyzeFrameWithYOLO, YOLODetectionItem } from '@/lib/yoloApi';
+import { DetectionBox, DetectionClass } from '@/types/football';
+import { analyzeFrameWithYOLO, YOLOTimeline } from '@/lib/yoloApi';
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
@@ -21,7 +21,7 @@ interface TacticalVideoPlayerProps {
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
-  timeline?: Record<string, { timestamp: number; detections: YOLODetectionItem[]; counts: Record<string, number> }>;
+  timeline?: YOLOTimeline;
   onEventClick?: (time: string) => void;
   showTimeline?: boolean;
   onDetectionsUpdate?: (
@@ -39,8 +39,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   duration = '00:10',
   confidenceThreshold = 0.25,
   timeline,
-  onEventClick,
-  showTimeline = true,
   onDetectionsUpdate,
   onPlayStateChange,
 }) => {
@@ -51,7 +49,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [totalDurationSec, setTotalDurationSec] = useState<number>(10);
-  const [displayDuration, setDisplayDuration] = useState<string>(duration);
+  const [loadedDuration, setLoadedDuration] = useState<string | null>(null);
+  const displayDuration = loadedDuration || duration || '00:10';
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -67,17 +66,11 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
 
-  // Sync duration prop
-  useEffect(() => {
-    if (duration) {
-      setDisplayDuration(duration);
-    }
-  }, [duration]);
-
   // Reset when videoUrl changes
   useEffect(() => {
     setVideoHasError(false);
     setCurrentBoxes([]);
+    setLoadedDuration(null);
     if (videoUrl) {
       setIsPlaying(false);
       setCurrentTimeSec(0);
@@ -146,7 +139,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
         const mappedBoxes: DetectionBox[] = res.detections.map((d) => ({
           id: d.id,
-          class: d.class as any,
+          class: d.class as DetectionClass,
           label: d.label,
           confidence: d.confidence,
           x: d.x,
@@ -161,11 +154,12 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsInferencing(false);
       // Non-blocking error notice
-      if (err.message && !err.message.includes('abort')) {
-        setInferenceError(err.message);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg && !msg.includes('abort')) {
+        setInferenceError(msg);
       }
     }
   }, [confidenceThreshold, isInferencing, onDetectionsUpdate, videoHasError, imageSrc]);
@@ -194,7 +188,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       if (entry && entry.detections) {
         const mapped: DetectionBox[] = entry.detections.map((d) => ({
           id: d.id,
-          class: d.class as any,
+          class: d.class as DetectionClass,
           label: d.label,
           confidence: d.confidence,
           x: d.x,
@@ -263,7 +257,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       } else {
         try {
           await videoRef.current.play();
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.warn('HTML5 Video play error handled gracefully:', err);
           // If browser rejected playback (e.g. unsupported codec), fallback to timer + frame analysis
           setVideoHasError(true);
@@ -302,7 +296,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       setTotalDurationSec(dur);
       const m = Math.floor(dur / 60);
       const s = Math.floor(dur % 60);
-      setDisplayDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+      setLoadedDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
       // Run initial detection frame
       runFrameInference();
     }
