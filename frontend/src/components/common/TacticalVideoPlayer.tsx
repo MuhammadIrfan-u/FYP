@@ -10,7 +10,6 @@ import {
   EyeOff,
   Crosshair,
   Zap,
-  Activity,
   AlertCircle,
 } from 'lucide-react';
 import { INITIAL_DETECTION_BOXES } from '@/lib/mockData';
@@ -38,7 +37,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   imageSrc = '/match_tactical_frame.jpg',
   videoUrl,
   matchName = 'Football Session',
-  duration = '00:05',
+  duration = '00:10',
   confidenceThreshold = 0.25,
   timeline,
   onEventClick,
@@ -52,13 +51,16 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
-  const [totalDurationSec, setTotalDurationSec] = useState<number>(5);
+  const [totalDurationSec, setTotalDurationSec] = useState<number>(10);
   const [displayDuration, setDisplayDuration] = useState<string>(duration);
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [showSpeed, setShowSpeed] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // Video element playback & error state
+  const [videoHasError, setVideoHasError] = useState<boolean>(false);
 
   // Active detections rendered over video
   const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>(INITIAL_DETECTION_BOXES);
@@ -75,6 +77,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
   // Reset when videoUrl changes
   useEffect(() => {
+    setVideoHasError(false);
     if (videoUrl) {
       setIsPlaying(false);
       setCurrentTimeSec(0);
@@ -90,14 +93,15 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     return (box.confidence ?? 0) >= (confidenceThreshold ?? 0.25);
   });
 
-  // Extract frame from HTML5 video or fallback image and run YOLO inference
+  // Extract frame from HTML5 video or fallback tactical image and run YOLO inference
   const runFrameInference = useCallback(async () => {
     if (isInferencing) return;
 
     try {
       let dataUrl: string | null = null;
 
-      if (videoRef.current && videoRef.current.readyState >= 2) {
+      // Try reading from <video> if element is loaded and ready
+      if (videoRef.current && videoRef.current.readyState >= 2 && !videoHasError) {
         const video = videoRef.current;
         const canvas = canvasRef.current || document.createElement('canvas');
         canvas.width = video.videoWidth || 640;
@@ -106,6 +110,27 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        }
+      }
+
+      // If video frame not available, capture fallback tactical frame image
+      if (!dataUrl) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+          img.src = imageSrc || '/match_tactical_frame.jpg';
+        });
+        if (img.width > 0) {
+          const canvas = canvasRef.current || document.createElement('canvas');
+          canvas.width = img.width || 640;
+          canvas.height = img.height || 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          }
         }
       }
 
@@ -143,7 +168,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         setInferenceError(err.message);
       }
     }
-  }, [confidenceThreshold, isInferencing, onDetectionsUpdate]);
+  }, [confidenceThreshold, isInferencing, onDetectionsUpdate, videoHasError, imageSrc]);
 
   // Synchronize timeline detections if available
   const syncTimelineDetections = useCallback((timeSec: number) => {
@@ -153,7 +178,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     const timestamps = Object.keys(timeline).map(Number).sort((a, b) => a - b);
     if (timestamps.length === 0) return false;
 
-    // Find closest timestamp within 0.75 seconds
+    // Find closest timestamp within 1 second
     let closest = timestamps[0];
     let minDiff = Math.abs(timeSec - closest);
     for (const ts of timestamps) {
@@ -187,6 +212,18 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     return false;
   }, [timeline, onDetectionsUpdate, lastLatencyMs]);
 
+  // Playback timer simulation when video element has error or fallback image is used
+  useEffect(() => {
+    if (!isPlaying) return;
+    if (videoUrl && !videoHasError) return; // real video drives time
+
+    const timer = setInterval(() => {
+      setCurrentTimeSec((prev) => (prev >= totalDurationSec ? 0 : prev + 0.5));
+    }, 500 / speed);
+
+    return () => clearInterval(timer);
+  }, [isPlaying, videoUrl, videoHasError, totalDurationSec, speed]);
+
   // Real-time analysis loop while video is playing
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
@@ -210,30 +247,41 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     };
   }, [isPlaying, currentTimeSec, runFrameInference, syncTimelineDetections]);
 
-  // Handle Play/Pause
-  const handleTogglePlay = () => {
+  // Handle Play/Pause safely without unhandled NotSupportedError
+  const handleTogglePlay = async () => {
     const nextState = !isPlaying;
-    if (videoUrl && videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play().catch((err) => console.warn('Video play error:', err));
-      }
-    }
     setIsPlaying(nextState);
     if (onPlayStateChange) onPlayStateChange(nextState);
+
+    if (videoUrl && videoRef.current && !videoHasError) {
+      if (isPlaying) {
+        try {
+          videoRef.current.pause();
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          await videoRef.current.play();
+        } catch (err: any) {
+          console.warn('HTML5 Video play error handled gracefully:', err);
+          // If browser rejected playback (e.g. unsupported codec), fallback to timer + frame analysis
+          setVideoHasError(true);
+        }
+      }
+    }
   };
 
   const handleSpeedChange = (newSpeed: number) => {
     setSpeed(newSpeed);
-    if (videoUrl && videoRef.current) {
+    if (videoUrl && videoRef.current && !videoHasError) {
       videoRef.current.playbackRate = newSpeed;
     }
   };
 
   const handleSeek = (seconds: number) => {
     setCurrentTimeSec(seconds);
-    if (videoUrl && videoRef.current) {
+    if (videoUrl && videoRef.current && !videoHasError) {
       videoRef.current.currentTime = seconds;
     }
     syncTimelineDetections(seconds);
@@ -241,7 +289,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   };
 
   const handleVideoTimeUpdate = () => {
-    if (videoRef.current) {
+    if (videoRef.current && !videoHasError) {
       const cur = videoRef.current.currentTime;
       setCurrentTimeSec(cur);
       syncTimelineDetections(cur);
@@ -249,7 +297,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   };
 
   const handleVideoLoadedMetadata = () => {
-    if (videoRef.current && videoRef.current.duration) {
+    if (videoRef.current && videoRef.current.duration && !videoHasError) {
       const dur = Math.floor(videoRef.current.duration);
       setTotalDurationSec(dur);
       const m = Math.floor(dur / 60);
@@ -385,12 +433,17 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
       {/* Main Video Viewport & YOLO Overlays */}
       <div className="relative aspect-video w-full bg-[#1A1A1A] overflow-hidden group select-none">
-        {videoUrl ? (
+        {videoUrl && !videoHasError ? (
           <video
             ref={videoRef}
             src={videoUrl}
             className="w-full h-full object-contain"
             playsInline
+            crossOrigin="anonymous"
+            onError={() => {
+              console.warn('Video element source failed to load, switching to tactical view');
+              setVideoHasError(true);
+            }}
             onTimeUpdate={handleVideoTimeUpdate}
             onLoadedMetadata={handleVideoLoadedMetadata}
             onEnded={() => {
@@ -493,7 +546,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const percent = (e.clientX - rect.left) / rect.width;
-              handleSeek(percent * (totalDurationSec || 5));
+              handleSeek(percent * (totalDurationSec || 10));
             }}
           >
             <div
