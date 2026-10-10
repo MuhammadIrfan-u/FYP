@@ -1,19 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play,
   Pause,
   RotateCcw,
   Maximize2,
-  Sparkles,
   Eye,
   EyeOff,
   Crosshair,
   Zap,
+  Activity,
+  AlertCircle,
 } from 'lucide-react';
 import { INITIAL_DETECTION_BOXES } from '@/lib/mockData';
 import { DetectionBox } from '@/types/football';
+import { analyzeFrameWithYOLO, YOLODetectionItem } from '@/lib/yoloApi';
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
@@ -21,46 +23,57 @@ interface TacticalVideoPlayerProps {
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
+  timeline?: Record<string, { timestamp: number; detections: YOLODetectionItem[]; counts: Record<string, number> }>;
   onEventClick?: (time: string) => void;
   showTimeline?: boolean;
+  onDetectionsUpdate?: (
+    detections: DetectionBox[],
+    counts: Record<string, number>,
+    latencyMs: number
+  ) => void;
+  onPlayStateChange?: (isPlaying: boolean) => void;
 }
 
 export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   imageSrc = '/match_tactical_frame.jpg',
   videoUrl,
-  matchName = 'FC Dynamo vs Rapid Stars - 1st Half',
-  duration = '48:15',
+  matchName = 'Football Session',
+  duration = '00:05',
   confidenceThreshold = 0.25,
+  timeline,
   onEventClick,
   showTimeline = true,
+  onDetectionsUpdate,
+  onPlayStateChange,
 }) => {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTimeSec, setCurrentTimeSec] = useState<number>(videoUrl ? 0 : 43);
-  const [totalDurationSec, setTotalDurationSec] = useState<number>(2895);
+  const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
+  const [totalDurationSec, setTotalDurationSec] = useState<number>(5);
   const [displayDuration, setDisplayDuration] = useState<string>(duration);
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [showSpeed, setShowSpeed] = useState<boolean>(true);
-  const [showAIOverlay, setShowAIOverlay] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
-  // Filter boxes by confidence threshold
-  const visibleBoxes: DetectionBox[] = INITIAL_DETECTION_BOXES.filter((box) => {
-    if (!showBoxes && box.class !== 'ai') return false;
-    if (!showAIOverlay && box.class === 'ai') return false;
-    return box.confidence >= confidenceThreshold;
-  });
+  // Active detections rendered over video
+  const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>(INITIAL_DETECTION_BOXES);
+  const [isInferencing, setIsInferencing] = useState<boolean>(false);
+  const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
+  const [inferenceError, setInferenceError] = useState<string | null>(null);
 
-  // Keep duration synchronized if prop changes
+  // Sync duration prop
   useEffect(() => {
     if (duration) {
       setDisplayDuration(duration);
     }
   }, [duration]);
 
-  // When videoUrl changes, reset playback
+  // Reset when videoUrl changes
   useEffect(() => {
     if (videoUrl) {
       setIsPlaying(false);
@@ -71,18 +84,144 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     }
   }, [videoUrl]);
 
+  // Filter boxes by confidence threshold
+  const visibleBoxes: DetectionBox[] = currentBoxes.filter((box) => {
+    if (!showBoxes) return false;
+    return (box.confidence ?? 0) >= (confidenceThreshold ?? 0.25);
+  });
+
+  // Extract frame from HTML5 video or fallback image and run YOLO inference
+  const runFrameInference = useCallback(async () => {
+    if (isInferencing) return;
+
+    try {
+      let dataUrl: string | null = null;
+
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current || document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        }
+      }
+
+      if (!dataUrl) return;
+
+      setIsInferencing(true);
+      const res = await analyzeFrameWithYOLO(dataUrl, confidenceThreshold);
+      setIsInferencing(false);
+
+      if (res && res.success) {
+        setInferenceError(null);
+        setLastLatencyMs(res.inference_time_ms || 40);
+
+        const mappedBoxes: DetectionBox[] = res.detections.map((d) => ({
+          id: d.id,
+          class: d.class as any,
+          label: d.label,
+          confidence: d.confidence,
+          x: d.x,
+          y: d.y,
+          w: d.w,
+          h: d.h,
+        }));
+
+        setCurrentBoxes(mappedBoxes);
+
+        if (onDetectionsUpdate) {
+          onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms);
+        }
+      }
+    } catch (err: any) {
+      setIsInferencing(false);
+      // Non-blocking error notice
+      if (err.message && !err.message.includes('abort')) {
+        setInferenceError(err.message);
+      }
+    }
+  }, [confidenceThreshold, isInferencing, onDetectionsUpdate]);
+
+  // Synchronize timeline detections if available
+  const syncTimelineDetections = useCallback((timeSec: number) => {
+    if (!timeline || Object.keys(timeline).length === 0) return false;
+
+    // Find nearest timestamp in timeline
+    const timestamps = Object.keys(timeline).map(Number).sort((a, b) => a - b);
+    if (timestamps.length === 0) return false;
+
+    // Find closest timestamp within 0.75 seconds
+    let closest = timestamps[0];
+    let minDiff = Math.abs(timeSec - closest);
+    for (const ts of timestamps) {
+      const diff = Math.abs(timeSec - ts);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = ts;
+      }
+    }
+
+    if (minDiff <= 1.0) {
+      const entry = timeline[closest.toFixed(2)] || timeline[closest.toString()];
+      if (entry && entry.detections) {
+        const mapped: DetectionBox[] = entry.detections.map((d) => ({
+          id: d.id,
+          class: d.class as any,
+          label: d.label,
+          confidence: d.confidence,
+          x: d.x,
+          y: d.y,
+          w: d.w,
+          h: d.h,
+        }));
+        setCurrentBoxes(mapped);
+        if (onDetectionsUpdate) {
+          onDetectionsUpdate(mapped, entry.counts, lastLatencyMs);
+        }
+        return true;
+      }
+    }
+    return false;
+  }, [timeline, onDetectionsUpdate, lastLatencyMs]);
+
+  // Real-time analysis loop while video is playing
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+
+    if (isPlaying) {
+      // Run once immediately upon playing
+      runFrameInference();
+
+      // Sample every 400ms for continuous real-time YOLO tracking
+      intervalId = setInterval(() => {
+        // If timeline didn't provide synchronized frame, run live frame inference
+        const synchronized = syncTimelineDetections(currentTimeSec);
+        if (!synchronized) {
+          runFrameInference();
+        }
+      }, 400);
+    }
+
+    return () => {
+      if (intervalId) clearIntervalId(intervalId);
+    };
+  }, [isPlaying, currentTimeSec, runFrameInference, syncTimelineDetections]);
+
   // Handle Play/Pause
   const handleTogglePlay = () => {
+    const nextState = !isPlaying;
     if (videoUrl && videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
       } else {
         videoRef.current.play().catch((err) => console.warn('Video play error:', err));
       }
-      setIsPlaying(!isPlaying);
-    } else {
-      setIsPlaying(!isPlaying);
     }
+    setIsPlaying(nextState);
+    if (onPlayStateChange) onPlayStateChange(nextState);
   };
 
   const handleSpeedChange = (newSpeed: number) => {
@@ -97,23 +236,15 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     if (videoUrl && videoRef.current) {
       videoRef.current.currentTime = seconds;
     }
+    syncTimelineDetections(seconds);
+    setTimeout(() => runFrameInference(), 100);
   };
-
-  // Playback timer simulation for image-only fallback
-  useEffect(() => {
-    if (videoUrl) return; // real video drives time
-    let interval: NodeJS.Timeout;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentTimeSec((prev) => (prev >= totalDurationSec ? 0 : prev + 1));
-      }, 1000 / speed);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, speed, videoUrl, totalDurationSec]);
 
   const handleVideoTimeUpdate = () => {
     if (videoRef.current) {
-      setCurrentTimeSec(Math.floor(videoRef.current.currentTime));
+      const cur = videoRef.current.currentTime;
+      setCurrentTimeSec(cur);
+      syncTimelineDetections(cur);
     }
   };
 
@@ -124,6 +255,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       const m = Math.floor(dur / 60);
       const s = Math.floor(dur % 60);
       setDisplayDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+      // Run initial detection frame
+      runFrameInference();
     }
   };
 
@@ -133,88 +266,85 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  // Dynamic box styling by class
   const getBoxStyle = (box: DetectionBox) => {
-    switch (box.class) {
-      case 'player':
-        return {
-          border: 'border-[#2563EB]',
-          bg: 'bg-[#2563EB]/15',
-          badge: 'bg-[#2563EB] text-white',
-          glow: 'shadow-xs',
-        };
+    const c = (box.class || '').toLowerCase();
+    switch (c) {
+      case 'football':
       case 'ball':
         return {
           border: 'border-[#D97706]',
           bg: 'bg-[#D97706]/20',
           badge: 'bg-[#D97706] text-white',
-          glow: 'shadow-xs',
+          name: 'Football',
         };
+      case 'football goal':
       case 'goal':
         return {
           border: 'border-[#DC2626]',
-          bg: 'bg-[#DC2626]/15',
+          bg: 'bg-[#DC2626]/20',
           badge: 'bg-[#DC2626] text-white',
-          glow: 'shadow-xs',
+          name: 'Football Goal',
+        };
+      case 'player with ball':
+        return {
+          border: 'border-[#059669]',
+          bg: 'bg-[#059669]/25',
+          badge: 'bg-[#059669] text-white ring-1 ring-white/50',
+          name: 'Player with Ball',
         };
       case 'referee':
         return {
-          border: 'border-[#555555]',
-          bg: 'bg-[#555555]/20',
-          badge: 'bg-[#555555] text-white',
-          glow: 'shadow-xs',
+          border: 'border-[#64748B]',
+          bg: 'bg-[#64748B]/20',
+          badge: 'bg-[#64748B] text-white',
+          name: 'Referee',
         };
-      case 'ai':
-        return {
-          border: 'border-[#7C3AED] border-dashed',
-          bg: 'bg-[#7C3AED]/15 backdrop-blur-[2px]',
-          badge: 'bg-[#7C3AED] text-white',
-          glow: 'shadow-xs',
-        };
+      case 'player':
       default:
         return {
           border: 'border-[#2563EB]',
           bg: 'bg-[#2563EB]/15',
           badge: 'bg-[#2563EB] text-white',
-          glow: '',
+          name: 'Player',
         };
     }
   };
 
-  // Timeline key events
-  const timelineMarkers = [
-    { sec: 8, label: '00:08 Pass #10', color: '#2563EB' },
-    { sec: 21, label: '00:21 Dribble #7', color: '#16A34A' },
-    { sec: 43, label: '00:43 Shot #10', color: '#D97706' },
-    { sec: 72, label: '01:12 Sprint #11', color: '#2563EB' },
-    { sec: 160, label: '02:40 Goal #9', color: '#DC2626' },
-  ];
-
   return (
     <div
+      ref={containerRef}
       className={`relative flex flex-col bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl overflow-hidden shadow-md ${
-        isFullscreen ? 'fixed inset-0 z-50 rounded-none' : 'w-full'
+        isFullscreen ? 'fixed inset-0 z-50 rounded-none h-screen' : 'w-full'
       }`}
     >
-      {/* Top Video Header Bar */}
+      {/* Hidden processing canvas */}
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* Top Header Status Bar */}
       <div className="bg-[#F9F7F2] px-4 py-2.5 border-b border-[#E8E3D8] flex items-center justify-between z-20">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#DC2626] animate-pulse" />
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                isPlaying ? 'bg-[#16A34A] animate-ping' : 'bg-[#DC2626]'
+              }`}
+            />
             <span className="text-xs font-bold tracking-wider uppercase text-[#242424]">
-              YOLOv11 Tactical Live Feed
+              {isPlaying ? 'YOLO Model Live Inference' : 'Video Player Ready'}
             </span>
           </div>
           <span className="text-xs text-[#D9D3C5] hidden sm:inline">|</span>
-          <span className="text-xs text-[#858585] font-medium hidden sm:inline">
+          <span className="text-xs text-[#858585] font-medium truncate max-w-[200px] sm:max-w-xs">
             {matchName}
           </span>
         </div>
 
-        {/* Quick Detection Layer Toggles */}
+        {/* Layer Toggles & Status */}
         <div className="flex items-center gap-1.5 text-xs">
           <button
             onClick={() => setShowBoxes(!showBoxes)}
-            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all ${
+            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
               showBoxes
                 ? 'bg-[#262626] border-[#262626] text-white'
                 : 'bg-[#FAF8F4] border-[#E8E3D8] text-[#555555] hover:text-[#242424]'
@@ -227,12 +357,12 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
           <button
             onClick={() => setShowLabels(!showLabels)}
-            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all ${
+            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
               showLabels
                 ? 'bg-[#262626] border-[#262626] text-white'
                 : 'bg-[#FAF8F4] border-[#E8E3D8] text-[#555555] hover:text-[#242424]'
             }`}
-            title="Toggle Class Labels & Confidence"
+            title="Toggle Confidence Scores"
           >
             <Crosshair className="w-3.5 h-3.5" />
             <span className="hidden md:inline">Confidence</span>
@@ -240,28 +370,15 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
           <button
             onClick={() => setShowSpeed(!showSpeed)}
-            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all ${
+            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all cursor-pointer ${
               showSpeed
                 ? 'bg-[#262626] border-[#262626] text-white'
                 : 'bg-[#FAF8F4] border-[#E8E3D8] text-[#555555] hover:text-[#242424]'
             }`}
-            title="Toggle Velocity Tags"
+            title="Toggle Class Tag Badges"
           >
             <Zap className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Velocity</span>
-          </button>
-
-          <button
-            onClick={() => setShowAIOverlay(!showAIOverlay)}
-            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1 transition-all ${
-              showAIOverlay
-                ? 'bg-[#7C3AED] border-[#7C3AED] text-white'
-                : 'bg-[#FAF8F4] border-[#E8E3D8] text-[#555555] hover:text-[#242424]'
-            }`}
-            title="Toggle AI Tactical Advice"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">AI Layer</span>
+            <span className="hidden md:inline">Class Tags</span>
           </button>
         </div>
       </div>
@@ -276,10 +393,13 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             playsInline
             onTimeUpdate={handleVideoTimeUpdate}
             onLoadedMetadata={handleVideoLoadedMetadata}
-            onEnded={() => setIsPlaying(false)}
+            onEnded={() => {
+              setIsPlaying(false);
+              if (onPlayStateChange) onPlayStateChange(false);
+            }}
           />
         ) : (
-          /* Pitch Frame Image */
+          /* Fallback tactical image */
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={imageSrc}
@@ -288,130 +408,123 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           />
         )}
 
-        {/* Subtle Pitch Scanner Line on playback */}
+        {/* Scanner Line on playback */}
         {isPlaying && (
           <div
-            className="absolute inset-y-0 w-1 bg-gradient-to-b from-transparent via-white/80 to-transparent shadow-[0_0_10px_white] animate-pulse pointer-events-none transition-all duration-300"
-            style={{ left: `${(currentTimeSec % 100)}%` }}
+            className="absolute inset-y-0 w-0.5 bg-gradient-to-b from-transparent via-white/80 to-transparent shadow-[0_0_8px_white] pointer-events-none transition-all duration-150"
+            style={{
+              left: `${totalDurationSec > 0 ? (currentTimeSec / totalDurationSec) * 100 : (currentTimeSec % 100)}%`,
+            }}
           />
         )}
 
         {/* YOLO Bounding Boxes Layer */}
-        <div className="absolute inset-0 pointer-events-none">
-          {visibleBoxes.map((box) => {
-            const style = getBoxStyle(box);
-            return (
-              <div
-                key={box.id}
-                className={`absolute border-2 ${style.border} ${style.bg} ${style.glow} transition-all duration-150`}
-                style={{
-                  left: `${box.x}%`,
-                  top: `${box.y}%`,
-                  width: `${box.w}%`,
-                  height: `${box.h}%`,
-                }}
-              >
-                {/* YOLO Label & Confidence Badge */}
-                {showLabels && (
-                  <div
-                    className={`absolute -top-5 left-0 px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase tracking-tight flex items-center gap-1 shadow-xs ${style.badge}`}
-                  >
-                    <span>{box.label}</span>
-                    {box.jerseyNumber && (
-                      <span className="opacity-90">#{box.jerseyNumber}</span>
-                    )}
-                  </div>
-                )}
+        {showBoxes && (
+          <div className="absolute inset-0 pointer-events-none">
+            {visibleBoxes.map((box) => {
+              const style = getBoxStyle(box);
+              return (
+                <div
+                  key={box.id}
+                  className={`absolute border-2 ${style.border} ${style.bg} transition-all duration-150`}
+                  style={{
+                    left: `${box.x}%`,
+                    top: `${box.y}%`,
+                    width: `${box.w}%`,
+                    height: `${box.h}%`,
+                  }}
+                >
+                  {/* Class Label & Confidence Score Badge */}
+                  {showLabels && (
+                    <div
+                      className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-mono font-bold uppercase tracking-tight flex items-center gap-1 shadow-xs whitespace-nowrap ${style.badge}`}
+                    >
+                      <span>{style.name}</span>
+                      {box.confidence !== undefined && (
+                        <span className="opacity-90 font-semibold">
+                          {(box.confidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
 
-                {/* Velocity / Speed Tag */}
-                {showSpeed && box.speed && (
-                  <div className="absolute -bottom-4.5 right-0 bg-[#FAF8F4] border border-[#E8E3D8] text-[#242424] px-1 py-0.2 rounded text-[9px] font-mono font-bold shadow-xs">
-                    {box.speed}
-                  </div>
-                )}
+                  {/* Corner Crosshair Accents */}
+                  <span className="absolute -top-1 -left-1 w-1.5 h-1.5 border-t-2 border-l-2 border-white/80" />
+                  <span className="absolute -top-1 -right-1 w-1.5 h-1.5 border-t-2 border-r-2 border-white/80" />
+                  <span className="absolute -bottom-1 -left-1 w-1.5 h-1.5 border-b-2 border-l-2 border-white/80" />
+                  <span className="absolute -bottom-1 -right-1 w-1.5 h-1.5 border-b-2 border-r-2 border-white/80" />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-                {/* Corner Crosshair Accents */}
-                <span className="absolute -top-1 -left-1 w-1.5 h-1.5 border-t-2 border-l-2 border-white/80" />
-                <span className="absolute -top-1 -right-1 w-1.5 h-1.5 border-t-2 border-r-2 border-white/80" />
-                <span className="absolute -bottom-1 -left-1 w-1.5 h-1.5 border-b-2 border-l-2 border-white/80" />
-                <span className="absolute -bottom-1 -right-1 w-1.5 h-1.5 border-b-2 border-r-2 border-white/80" />
-              </div>
-            );
-          })}
+        {/* Real-time Model HUD Overlay */}
+        <div className="absolute bottom-3 right-3 bg-[#FAF8F4]/90 backdrop-blur-md border border-[#E8E3D8] rounded-xl px-3 py-1.5 text-[11px] text-[#404040] flex items-center gap-2 pointer-events-none shadow-xs">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isPlaying ? 'bg-[#16A34A] animate-pulse' : 'bg-[#D97706]'
+            }`}
+          />
+          <span className="font-semibold text-[#242424]">Model: best_5.pt</span>
+          <span>•</span>
+          <span className="font-mono text-[#555555]">{lastLatencyMs}ms</span>
+          <span>•</span>
+          <span className="font-bold text-[#2563EB]">
+            {visibleBoxes.length} Detections
+          </span>
         </div>
 
-        {/* Pitch Tactical HUD Watermark */}
-        <div className="absolute bottom-3 right-3 bg-[#FAF8F4]/90 backdrop-blur-md border border-[#E8E3D8] rounded-lg px-2.5 py-1 text-[11px] text-[#404040] flex items-center gap-2 pointer-events-none shadow-xs">
-          <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
-          <span>FPS: 30</span>
-          <span>•</span>
-          <span>1080p</span>
-          <span>•</span>
-          <span className="text-[#242424] font-bold">YOLO Football v11x</span>
-        </div>
+        {/* Inference notice if error */}
+        {inferenceError && (
+          <div className="absolute top-3 left-3 bg-[#FEF2F2]/90 border border-[#FECACA] rounded-lg px-2.5 py-1 text-[11px] text-[#991B1B] flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 text-[#DC2626]" />
+            <span>Inference notice: check backend connection</span>
+          </div>
+        )}
       </div>
 
-      {/* Scrub Bar & Event Markers */}
+      {/* Scrub Bar & Video Controls */}
       <div className="bg-[#F9F7F2] px-4 pt-3 pb-2 border-t border-[#E8E3D8] flex flex-col gap-2">
         <div className="relative w-full flex items-center">
-          {/* Base progress track */}
+          {/* Progress bar track */}
           <div
             className="w-full h-2 bg-[#E8E3D8] rounded-full cursor-pointer relative overflow-hidden"
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const percent = (e.clientX - rect.left) / rect.width;
-              handleSeek(Math.floor(percent * (totalDurationSec || 2895)));
+              handleSeek(percent * (totalDurationSec || 5));
             }}
           >
-            {/* Filled progress bar */}
             <div
               className="h-full bg-[#262626] transition-all rounded-full"
-              style={{ width: `${totalDurationSec > 0 ? (currentTimeSec / totalDurationSec) * 100 : 0}%` }}
+              style={{
+                width: `${totalDurationSec > 0 ? (currentTimeSec / totalDurationSec) * 100 : 0}%`,
+              }}
             />
           </div>
-
-          {/* Timeline Event Markers */}
-          {showTimeline &&
-            timelineMarkers.map((m, idx) => {
-              const posPercent = (m.sec / (totalDurationSec || 2895)) * 100;
-              return (
-                <button
-                  key={`marker-${idx}`}
-                  onClick={() => {
-                    handleSeek(m.sec);
-                    if (onEventClick) onEventClick(m.label);
-                  }}
-                  title={m.label}
-                  className="group/marker absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border border-white transition-transform hover:scale-150 z-10"
-                  style={{
-                    left: `${posPercent}%`,
-                    backgroundColor: m.color,
-                  }}
-                >
-                  <span className="opacity-0 group-hover/marker:opacity-100 transition-opacity absolute bottom-3.5 left-1/2 -translate-x-1/2 bg-[#FAF8F4] text-[#242424] border border-[#E8E3D8] text-[10px] font-bold px-2 py-0.5 rounded whitespace-nowrap shadow-md pointer-events-none">
-                    {m.label}
-                  </span>
-                </button>
-              );
-            })}
         </div>
 
-        {/* Video Control Buttons Row */}
+        {/* Controls Row */}
         <div className="flex items-center justify-between text-xs pt-1">
           <div className="flex items-center gap-3">
-            {/* Play/Pause */}
+            {/* Play/Pause Button */}
             <button
               onClick={handleTogglePlay}
-              className="p-2 rounded-lg bg-[#262626] hover:bg-[#171717] text-white transition-all shadow-xs"
-              title={isPlaying ? 'Pause' : 'Play'}
+              className="p-2 rounded-lg bg-[#262626] hover:bg-[#171717] text-white transition-all shadow-xs cursor-pointer"
+              title={isPlaying ? 'Pause' : 'Play Video'}
             >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-white" />}
+              {isPlaying ? (
+                <Pause className="w-4 h-4" />
+              ) : (
+                <Play className="w-4 h-4 fill-white" />
+              )}
             </button>
 
-            {/* Restart */}
+            {/* Reset Seek */}
             <button
               onClick={() => handleSeek(0)}
-              className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors"
+              className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors cursor-pointer"
               title="Reset to 00:00"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -419,20 +532,22 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
             {/* Time Stamp */}
             <div className="font-mono text-[#404040] tracking-wider font-semibold">
-              <span className="text-[#242424] font-bold">{formatTime(currentTimeSec)}</span>
+              <span className="text-[#242424] font-bold">
+                {formatTime(currentTimeSec)}
+              </span>
               <span className="text-[#858585]"> / </span>
               <span className="text-[#858585]">{displayDuration}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Playback Speed Switcher */}
+            {/* Speed Switcher */}
             <div className="flex items-center bg-[#FAF8F4] border border-[#E8E3D8] rounded-lg p-0.5 text-[11px]">
               {[0.5, 1, 2].map((s) => (
                 <button
                   key={s}
-                  onClick={() => setSpeed(s)}
-                  className={`px-2 py-0.5 rounded font-mono transition-colors ${
+                  onClick={() => handleSpeedChange(s)}
+                  className={`px-2 py-0.5 rounded font-mono transition-colors cursor-pointer ${
                     speed === s
                       ? 'bg-[#262626] text-white font-bold'
                       : 'text-[#858585] hover:text-[#242424]'
@@ -446,7 +561,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             {/* Fullscreen Toggle */}
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors"
+              className="p-2 rounded-lg bg-[#FAF8F4] hover:bg-[#EEEBE3] text-[#555555] border border-[#E8E3D8] transition-colors cursor-pointer"
               title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
             >
               <Maximize2 className="w-3.5 h-3.5" />
