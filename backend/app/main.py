@@ -7,16 +7,21 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+# Optimize PyTorch CPU threads for realtime execution
+torch.set_num_threads(4)
+
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 ASSETS_DIR = BASE_DIR / "assets"
 MODEL_PATH = ASSETS_DIR / "best_5.pt"
+ONNX_PATH = ASSETS_DIR / "best_5.onnx"
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -38,12 +43,16 @@ app.add_middleware(
 # Serve uploaded videos
 app.mount("/api/videos", StaticFiles(directory=str(UPLOADS_DIR)), name="videos")
 
-# Load YOLO model
-print(f"Loading YOLO model from: {MODEL_PATH}")
+# Load YOLO model (prefer optimized ONNX Runtime model if available, fallback to PyTorch .pt)
+target_model_path = ONNX_PATH if ONNX_PATH.exists() else MODEL_PATH
+print(f"Loading YOLO model from: {target_model_path}")
 try:
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
-    model = YOLO(str(MODEL_PATH))
+    if not target_model_path.exists():
+        raise FileNotFoundError(f"Model file not found at {target_model_path}")
+    if target_model_path.suffix == ".onnx":
+        model = YOLO(str(target_model_path), task="detect")
+    else:
+        model = YOLO(str(target_model_path))
     MODEL_LOADED = True
     MODEL_CLASSES = model.names
     print(f"Model successfully loaded! Detected classes: {MODEL_CLASSES}")
@@ -214,8 +223,8 @@ async def analyze_frame(raw_request: Request):
             status_code=400, detail="Invalid or empty image decoded from frame."
         )
 
-    # Run YOLO inference
-    results = model(img_bgr, conf=confidence_threshold, verbose=False)
+    # Run YOLO inference with optimized input resolution (imgsz=480 for realtime speed)
+    results = model(img_bgr, imgsz=480, conf=confidence_threshold, verbose=False)
     parsed = parse_detections(results, conf_threshold=confidence_threshold)
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
@@ -323,7 +332,7 @@ def analyze_video(
 
         if curr_frame_idx % step_frames == 0:
             timestamp = round(curr_frame_idx / video_fps, 2)
-            results = model(frame, conf=confidence_threshold, verbose=False)
+            results = model(frame, imgsz=480, conf=confidence_threshold, verbose=False)
             parsed = parse_detections(results, conf_threshold=confidence_threshold)
 
             timeline[f"{timestamp:.2f}"] = {
