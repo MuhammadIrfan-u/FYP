@@ -137,7 +137,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
         const mappedBoxes: DetectionBox[] = res.detections.map((d) => ({
           id: d.id,
-          class: d.class as any,
+          class: d.class as DetectionClass,
           label: d.label,
           confidence: d.confidence,
           x: d.x,
@@ -152,11 +152,12 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsInferencing(false);
       // Non-blocking error notice
-      if (err.message && !err.message.includes('abort')) {
-        setInferenceError(err.message);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg && !msg.includes('abort')) {
+        setInferenceError(msg);
       }
     }
   }, [confidenceThreshold, isInferencing, onDetectionsUpdate, videoHasError, imageSrc]);
@@ -185,7 +186,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       if (entry && entry.detections) {
         const mapped: DetectionBox[] = entry.detections.map((d) => ({
           id: d.id,
-          class: d.class as any,
+          class: d.class as DetectionClass,
           label: d.label,
           confidence: d.confidence,
           x: d.x,
@@ -254,7 +255,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       } else {
         try {
           await videoRef.current.play();
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.warn('HTML5 Video play error handled gracefully:', err);
           // If browser rejected playback (e.g. unsupported codec), fallback to timer + frame analysis
           setVideoHasError(true);
