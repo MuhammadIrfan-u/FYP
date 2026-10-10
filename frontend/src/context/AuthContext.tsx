@@ -16,7 +16,6 @@ interface AuthContextType {
   ) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   clearError: () => void;
-  demoSignIn: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -218,18 +217,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
   };
 
-  const demoSignIn = () => {
-    const demoUser = {
-      id: 'demo-coach-uuid-2026',
-      email: 'coach@footballclub.com',
-      app_metadata: {},
-      user_metadata: { name: 'Tactical Coach' },
-      aud: 'authenticated',
-      created_at: new Date().toISOString(),
-    } as unknown as User;
-    setUser(demoUser);
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -241,7 +228,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signUp,
         signOut,
         clearError,
-        demoSignIn,
       }}
     >
       {children}

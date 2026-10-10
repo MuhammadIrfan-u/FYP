@@ -17,7 +17,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 
 export const AuthView: React.FC = () => {
-  const { signIn, signUp, authError, clearError, demoSignIn } = useAuth();
+  const { signIn, signUp, authError, clearError } = useAuth();
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -248,22 +248,6 @@ export const AuthView: React.FC = () => {
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
               </>
             )}
-          </button>
-
-          <div className="relative my-4 flex items-center justify-center">
-            <div className="border-t border-[#E8E3D8] w-full" />
-            <span className="bg-[#FAF8F4] px-2 text-[10px] text-[#858585] uppercase tracking-wider font-semibold">
-              Or
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={demoSignIn}
-            className="w-full py-2.5 px-4 rounded-xl bg-[#EEEBE3] hover:bg-[#E4DFD5] text-[#242424] text-xs font-bold border border-[#D9D3C5] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-          >
-            <ShieldCheck className="w-4 h-4 text-[#16A34A]" />
-            <span>Enter as Coach (Quick Access)</span>
           </button>
         </form>
 
