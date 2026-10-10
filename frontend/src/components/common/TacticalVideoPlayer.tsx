@@ -529,7 +529,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
               isPlaying ? 'bg-[#16A34A] animate-pulse' : 'bg-[#D97706]'
             }`}
           />
-          <span className="font-semibold text-[#242424]">Model: best_5.pt</span>
+          <span className="font-semibold text-[#242424]">Model: {modelName || 'best_5.onnx'}</span>
           <span>•</span>
           <span className="font-mono text-[#555555]">{lastLatencyMs}ms</span>
           <span>•</span>

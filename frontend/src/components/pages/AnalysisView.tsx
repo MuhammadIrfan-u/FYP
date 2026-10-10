@@ -28,6 +28,7 @@ export const AnalysisView: React.FC = () => {
 
   // Model connection status
   const [modelStatus, setModelStatus] = useState<'checking' | 'ready' | 'offline'>('checking');
+  const [modelName, setModelName] = useState<string>('best_5.onnx');
 
   // Real-time detection state updated during video playback
   const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([]);
@@ -57,6 +58,9 @@ export const AnalysisView: React.FC = () => {
       if (mounted) {
         if (status.ready) {
           setModelStatus('ready');
+          if (status.model_file) {
+            setModelName(status.model_file);
+          }
         } else {
           setModelStatus('offline');
         }
