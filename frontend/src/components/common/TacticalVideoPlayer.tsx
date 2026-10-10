@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { DetectionBox, DetectionClass } from '@/types/football';
-import { analyzeFrameWithYOLO, YOLODetectionItem } from '@/lib/yoloApi';
+import { analyzeFrameWithYOLO, YOLOTimeline } from '@/lib/yoloApi';
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
@@ -21,7 +21,7 @@ interface TacticalVideoPlayerProps {
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
-  timeline?: Record<string, { timestamp: number; detections: YOLODetectionItem[]; counts: Record<string, number> }>;
+  timeline?: YOLOTimeline;
   onEventClick?: (time: string) => void;
   showTimeline?: boolean;
   onDetectionsUpdate?: (
