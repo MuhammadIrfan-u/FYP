@@ -12,7 +12,7 @@ import {
   Zap,
   AlertCircle,
 } from 'lucide-react';
-import { DetectionBox } from '@/types/football';
+import { DetectionBox, DetectionClass } from '@/types/football';
 import { analyzeFrameWithYOLO, YOLODetectionItem } from '@/lib/yoloApi';
 
 interface TacticalVideoPlayerProps {
@@ -39,8 +39,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   duration = '00:10',
   confidenceThreshold = 0.25,
   timeline,
-  onEventClick,
-  showTimeline = true,
   onDetectionsUpdate,
   onPlayStateChange,
 }) => {
@@ -51,7 +49,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [totalDurationSec, setTotalDurationSec] = useState<number>(10);
-  const [displayDuration, setDisplayDuration] = useState<string>(duration);
+  const displayDuration = duration || '00:10';
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -66,13 +64,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [isInferencing, setIsInferencing] = useState<boolean>(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
-
-  // Sync duration prop
-  useEffect(() => {
-    if (duration) {
-      setDisplayDuration(duration);
-    }
-  }, [duration]);
 
   // Reset when videoUrl changes
   useEffect(() => {
