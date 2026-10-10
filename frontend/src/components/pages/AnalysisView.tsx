@@ -15,7 +15,7 @@ import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 import { DetectionBox } from '@/types/football';
-import { analyzeVideoWithYOLO, checkYOLOStatus } from '@/lib/yoloApi';
+import { analyzeVideoWithYOLO, checkYOLOStatus, YOLOTimeline } from '@/lib/yoloApi';
 
 export const AnalysisView: React.FC = () => {
   const {
@@ -46,8 +46,8 @@ export const AnalysisView: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState<boolean>(false);
   const [batchProgressMsg, setBatchProgressMsg] = useState<string | null>(null);
-  const [timelineData, setTimelineData] = useState<Record<string, unknown> | undefined>(
-    activeVideo.timeline
+  const [timelineData, setTimelineData] = useState<YOLOTimeline | undefined>(
+    activeVideo.timeline as YOLOTimeline | undefined
   );
 
   // Check YOLO backend connectivity
@@ -70,7 +70,7 @@ export const AnalysisView: React.FC = () => {
   // Update timeline if active video changes
   useEffect(() => {
     if (activeVideo.timeline) {
-      setTimelineData(activeVideo.timeline);
+      setTimelineData(activeVideo.timeline as YOLOTimeline);
     }
   }, [activeVideo]);
 

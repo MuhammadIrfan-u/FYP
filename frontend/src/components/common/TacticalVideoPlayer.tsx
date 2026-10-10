@@ -49,7 +49,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const [totalDurationSec, setTotalDurationSec] = useState<number>(10);
-  const displayDuration = duration || '00:10';
+  const [loadedDuration, setLoadedDuration] = useState<string | null>(null);
+  const displayDuration = loadedDuration || duration || '00:10';
   const [speed, setSpeed] = useState<number>(1);
   const [showBoxes, setShowBoxes] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -69,6 +70,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   useEffect(() => {
     setVideoHasError(false);
     setCurrentBoxes([]);
+    setLoadedDuration(null);
     if (videoUrl) {
       setIsPlaying(false);
       setCurrentTimeSec(0);
@@ -294,7 +296,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       setTotalDurationSec(dur);
       const m = Math.floor(dur / 60);
       const s = Math.floor(dur % 60);
-      setDisplayDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
+      setLoadedDuration(`${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`);
       // Run initial detection frame
       runFrameInference();
     }
