@@ -7,7 +7,7 @@ import base64
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -136,35 +136,68 @@ def get_model_info():
     }
 
 @app.post("/api/analyze-frame")
-async def analyze_frame(
-    request: Optional[FrameAnalysisRequest] = None,
-    file: Optional[UploadFile] = File(None),
-    confidence_threshold: float = Form(0.25)
-):
+async def analyze_frame(raw_request: Request):
+    """
+    Analyzes a video frame image using the trained YOLO model best_5.pt.
+    Seamlessly parses JSON payload { image: base64, confidence_threshold: 0.25 }
+    or multipart/form-data.
+    """
     if not MODEL_LOADED or model is None:
         raise HTTPException(status_code=500, detail="YOLO model is not initialized.")
 
     start_time = time.time()
     img_bgr = None
+    confidence_threshold = 0.25
 
-    # Handle image from upload file
-    if file:
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    content_type = raw_request.headers.get("content-type", "").lower()
 
-    # Handle image from base64 JSON
-    elif request and request.image:
-        confidence_threshold = request.confidence_threshold or 0.25
-        b64_data = request.image
-        if "," in b64_data:
-            b64_data = b64_data.split(",", 1)[1]
-        img_bytes = base64.b64decode(b64_data)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if "application/json" in content_type:
+        try:
+            body = await raw_request.json()
+            b64_data = body.get("image", "")
+            if body.get("confidence_threshold") is not None:
+                confidence_threshold = float(body.get("confidence_threshold"))
 
-    if img_bgr is None:
-        raise HTTPException(status_code=400, detail="Invalid or missing frame image.")
+            if "," in b64_data:
+                b64_data = b64_data.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64_data)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode base64 JSON frame: {str(e)}")
+
+    elif "multipart/form-data" in content_type:
+        try:
+            form = await raw_request.form()
+            file_field = form.get("file")
+            conf_field = form.get("confidence_threshold")
+            if conf_field:
+                confidence_threshold = float(conf_field)
+            if file_field and hasattr(file_field, "read"):
+                contents = await file_field.read()
+                nparr = np.frombuffer(contents, np.uint8)
+                img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode multipart file: {str(e)}")
+
+    else:
+        # Fallback: attempt JSON decoding
+        try:
+            body = await raw_request.json()
+            b64_data = body.get("image", "")
+            if body.get("confidence_threshold") is not None:
+                confidence_threshold = float(body.get("confidence_threshold"))
+
+            if "," in b64_data:
+                b64_data = b64_data.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64_data)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid payload format: {str(e)}")
+
+    if img_bgr is None or img_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Invalid or empty image decoded from frame.")
 
     # Run YOLO inference
     results = model(img_bgr, conf=confidence_threshold, verbose=False)
