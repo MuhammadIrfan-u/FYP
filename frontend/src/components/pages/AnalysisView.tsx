@@ -313,7 +313,7 @@ export const AnalysisView: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-[#858585] mt-2 mb-3">
-              Predictions from trained YOLO model (<strong className="text-[#242424]">best_5.pt</strong>) updated dynamically with video playback.
+              Predictions from trained YOLO model (<strong className="text-[#242424]">{modelName}</strong>) updated dynamically with video playback.
             </p>
 
             <div className="divide-y divide-[#E8E3D8] text-xs">
@@ -457,7 +457,7 @@ export const AnalysisView: React.FC = () => {
             <div className="space-y-2 text-xs pt-2 border-t border-[#E8E3D8]">
               <div className="flex items-center justify-between text-[#858585]">
                 <span>Trained Model:</span>
-                <span className="font-mono font-bold text-[#242424]">best_5.pt</span>
+                <span className="font-mono font-bold text-[#242424]">{modelName}</span>
               </div>
 
               <div className="flex items-center justify-between text-[#858585]">
