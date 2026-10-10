@@ -22,6 +22,7 @@ import {
 } from '@/lib/mockData';
 import { useAuth } from '@/context/AuthContext';
 import { supabase, STORAGE_BUCKET_NAME, DatabaseSession } from '@/lib/supabase';
+import { uploadVideoToYOLO } from '@/lib/yoloApi';
 
 interface AIChatMessage {
   id: string;
