@@ -156,7 +156,7 @@ export const AnalysisView: React.FC = () => {
           liveDetections.length) *
         100
       ).toFixed(1)
-    : '91.4';
+    : '0.0';
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
