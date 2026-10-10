@@ -63,7 +63,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
   // Active detections rendered over video (populated dynamically by YOLO model)
   const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>([]);
-  const [isInferencing, setIsInferencing] = useState<boolean>(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
 
@@ -91,7 +90,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const runFrameInference = useCallback(async () => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
-    setIsInferencing(true);
 
     try {
       let dataUrl: string | null = null;
@@ -177,7 +175,6 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       }
     } finally {
       inFlightRef.current = false;
-      setIsInferencing(false);
     }
   }, [confidenceThreshold, onDetectionsUpdate, videoHasError, imageSrc]);
 
