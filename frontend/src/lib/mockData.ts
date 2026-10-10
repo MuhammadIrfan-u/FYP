@@ -168,16 +168,17 @@ export const INITIAL_DETECTION_BOXES: DetectionBox[] = [
 export const INITIAL_VIDEOS: MatchVideo[] = [
   {
     id: 'vid-1',
-    filename: 'match_dynamo_vs_rapid_h1.mp4',
-    matchName: 'FC Dynamo vs Rapid Stars - 1st Half',
+    filename: 'football_match_demo.mp4',
+    matchName: 'FC Dynamo vs Rapid Stars - Tactical Feed',
     date: 'Oct 08, 2026',
-    duration: '48:15',
-    size: '1.42 GB',
+    duration: '00:05',
+    size: '1.42 MB',
     status: 'Completed',
     progress: 100,
     thumbnail: '/match_tactical_frame.jpg',
+    videoUrl: '/football_match_demo.mp4',
     detections: {
-      players: 22,
+      players: 26,
       ball: 1,
       goals: 2,
       referee: 1,
