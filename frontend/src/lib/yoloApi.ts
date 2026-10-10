@@ -42,6 +42,12 @@ export interface YOLOVideoUploadResult {
   size_bytes: number;
 }
 
+export type YOLOTimeline = Record<string, {
+  timestamp: number;
+  detections: YOLODetectionItem[];
+  counts: Record<string, number>;
+}>;
+
 export interface YOLOVideoAnalysisResult {
   success: boolean;
   filename: string;
@@ -49,11 +55,7 @@ export interface YOLOVideoAnalysisResult {
   duration: number;
   total_frames: number;
   frames_analyzed: number;
-  timeline: Record<string, {
-    timestamp: number;
-    detections: YOLODetectionItem[];
-    counts: Record<string, number>;
-  }>;
+  timeline: YOLOTimeline;
   peak_class_counts: Record<string, number>;
   avg_class_counts: Record<string, number>;
 }
