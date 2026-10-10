@@ -62,6 +62,8 @@ export interface YOLOVideoAnalysisResult {
 
 export async function checkYOLOStatus(): Promise<{
   ready: boolean;
+  model_file?: string;
+  format?: string;
   classes?: Record<string, string>;
   error?: string;
 }> {
@@ -75,6 +77,8 @@ export async function checkYOLOStatus(): Promise<{
     const data = await res.json();
     return {
       ready: data.status === 'ready',
+      model_file: data.model_file || 'best_5.onnx',
+      format: data.format || 'onnx',
       classes: data.classes,
     };
   } catch (err) {

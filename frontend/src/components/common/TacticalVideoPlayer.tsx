@@ -22,6 +22,7 @@ interface TacticalVideoPlayerProps {
   duration?: string;
   confidenceThreshold?: number;
   timeline?: YOLOTimeline;
+  modelName?: string;
   onEventClick?: (time: string) => void;
   showTimeline?: boolean;
   onDetectionsUpdate?: (
@@ -39,6 +40,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   duration = '00:10',
   confidenceThreshold = 0.25,
   timeline,
+  modelName = 'best_5.onnx',
   onDetectionsUpdate,
   onPlayStateChange,
 }) => {
