@@ -6,7 +6,16 @@ export type PageId =
   | 'reports'
   | 'settings';
 
-export type DetectionClass = 'player' | 'ball' | 'goal' | 'referee' | 'ai';
+export type DetectionClass =
+  | 'player'
+  | 'football'
+  | 'football goal'
+  | 'player with ball'
+  | 'ball'
+  | 'goal'
+  | 'referee'
+  | 'ai'
+  | string;
 
 export interface DetectionBox {
   id: string;
@@ -40,8 +49,17 @@ export interface MatchVideo {
     ball: number;
     goals: number;
     referee: number;
+    player_with_ball?: number;
+  };
+  classCounts?: {
+    player?: number;
+    football?: number;
+    'football goal'?: number;
+    'player with ball'?: number;
+    [key: string]: number | undefined;
   };
   modelConfidence: number;
+  timeline?: Record<string, any>;
   metrics: {
     passes: number;
     shots: number;
