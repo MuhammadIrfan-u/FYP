@@ -145,7 +145,10 @@ def root():
 def get_model_info():
     return {
         "status": "ready" if MODEL_LOADED else "error",
-        "model_file": "best_5.pt",
+        "model_file": target_model_path.name if target_model_path else "best_5.pt",
+        "format": "onnx"
+        if target_model_path and target_model_path.suffix == ".onnx"
+        else "pytorch",
         "classes": MODEL_CLASSES,
         "default_confidence": 0.25,
     }

@@ -28,6 +28,7 @@ export const AnalysisView: React.FC = () => {
 
   // Model connection status
   const [modelStatus, setModelStatus] = useState<'checking' | 'ready' | 'offline'>('checking');
+  const [modelName, setModelName] = useState<string>('best_5.onnx');
 
   // Real-time detection state updated during video playback
   const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([]);
@@ -57,6 +58,9 @@ export const AnalysisView: React.FC = () => {
       if (mounted) {
         if (status.ready) {
           setModelStatus('ready');
+          if (status.model_file) {
+            setModelName(status.model_file);
+          }
         } else {
           setModelStatus('offline');
         }
@@ -105,7 +109,7 @@ export const AnalysisView: React.FC = () => {
       if (res && res.success) {
         setTimelineData(res.timeline);
         setBatchProgressMsg(null);
-        showToast(`Analyzed ${res.frames_analyzed} frames with model best_5.pt!`);
+        showToast(`Analyzed ${res.frames_analyzed} frames with model ${modelName}!`);
       }
     } catch (err: unknown) {
       setBatchProgressMsg(null);
@@ -119,7 +123,7 @@ export const AnalysisView: React.FC = () => {
   // Export detections JSON
   const handleExportJSON = () => {
     const payload = {
-      model: 'best_5.pt',
+      model: modelName,
       session: activeVideo.matchName,
       video: activeVideo.filename,
       timestamp: new Date().toISOString(),
@@ -187,7 +191,7 @@ export const AnalysisView: React.FC = () => {
             />
             <span className="font-medium">
               {modelStatus === 'ready'
-                ? 'Model: best_5.pt (Ready)'
+                ? `Model: ${modelName} (Ready)`
                 : modelStatus === 'offline'
                 ? 'Backend Offline'
                 : 'Connecting to Model...'}
@@ -215,7 +219,7 @@ export const AnalysisView: React.FC = () => {
             </span>
           </div>
           <span className="text-[11px] font-mono font-bold text-[#15803D] hidden sm:inline">
-            YOLOv11 • best_5.pt
+            YOLOv11 • {modelName}
           </span>
         </div>
       )}
@@ -231,6 +235,7 @@ export const AnalysisView: React.FC = () => {
             duration={activeVideo.duration}
             confidenceThreshold={confidenceThreshold}
             timeline={timelineData}
+            modelName={modelName}
             showTimeline={true}
             onDetectionsUpdate={handleDetectionsUpdate}
             onPlayStateChange={setIsPlaying}
@@ -308,7 +313,7 @@ export const AnalysisView: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-[#858585] mt-2 mb-3">
-              Predictions from trained YOLO model (<strong className="text-[#242424]">best_5.pt</strong>) updated dynamically with video playback.
+              Predictions from trained YOLO model (<strong className="text-[#242424]">{modelName}</strong>) updated dynamically with video playback.
             </p>
 
             <div className="divide-y divide-[#E8E3D8] text-xs">
@@ -452,7 +457,7 @@ export const AnalysisView: React.FC = () => {
             <div className="space-y-2 text-xs pt-2 border-t border-[#E8E3D8]">
               <div className="flex items-center justify-between text-[#858585]">
                 <span>Trained Model:</span>
-                <span className="font-mono font-bold text-[#242424]">best_5.pt</span>
+                <span className="font-mono font-bold text-[#242424]">{modelName}</span>
               </div>
 
               <div className="flex items-center justify-between text-[#858585]">
