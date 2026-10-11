@@ -133,6 +133,52 @@ def configured_mock_model(mock_detection_boxes, monkeypatch):
 
 
 @pytest.fixture
-def client(temp_uploads_dir, configured_mock_model):
-    """FastAPI TestClient with isolated uploads and mocked model."""
+def dummy_db_engine():
+    """Creates an isolated in-memory SQLite database engine for testing without any real external DB."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from app.database import Base
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    yield engine
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def dummy_db(dummy_db_engine):
+    """Yields a clean dummy database session, overriding FastAPI's get_db dependency."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import get_db
+
+    TestingSessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=dummy_db_engine
+    )
+    session = TestingSessionLocal()
+
+    def override_get_db():
+        try:
+            yield session
+        finally:
+            pass
+
+    main.app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        main.app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def client(temp_uploads_dir, configured_mock_model, dummy_db):
+    """FastAPI TestClient with isolated uploads, mocked model, and dummy in-memory DB."""
     return TestClient(main.app)
