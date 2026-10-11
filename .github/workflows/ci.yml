@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [workflow]
+    branches: [workflow, main]
   pull_request:
-    branches: [workflow]
+    branches: [workflow, main]
   schedule:
     # Weekly security scan so new CVEs are caught even without new commits
     - cron: "0 3 * * 1"
@@ -99,6 +99,16 @@ jobs:
 
       - name: Vulnerable dependency check (pip-audit)
         run: pip-audit -r backend/requirements.txt --no-deps --disable-pip
+        continue-on-error: true
+
+      - name: Install test dependencies
+        run: |
+          pip install -r backend/requirements-test.txt
+
+      - name: Run automated backend tests
+        working-directory: backend
+        run: |
+          python -m pytest
         continue-on-error: true
 
   # ---------------------------------------------------------------------------
