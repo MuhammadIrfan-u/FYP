@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [workflow, main]
   pull_request:
-    branches: [workflow, main]
   schedule:
     # Weekly security scan so new CVEs are caught even without new commits
     - cron: "0 3 * * 1"
