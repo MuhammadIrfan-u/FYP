@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [workflow]
   pull_request:
-    branches: [workflow]
   schedule:
     # Weekly security scan so new CVEs are caught even without new commits
     - cron: "0 3 * * 1"
@@ -17,8 +15,8 @@ concurrency:
 permissions:
   contents: read
 
-# NOTE: Every check below is non-blocking (continue-on-error), so the run stays
-# green. Findings still show up in each step's log. No test cases are run.
+# NOTE: Quality and security scans use continue-on-error, while the automated
+# backend test suite validates correctness and fails on test failures.
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -100,6 +98,35 @@ jobs:
       - name: Vulnerable dependency check (pip-audit)
         run: pip-audit -r backend/requirements.txt --no-deps --disable-pip
         continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Backend Tests (FastAPI / pytest): automated non-interactive test suite
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: Backend Tests (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements-test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      - name: Run backend tests
+        run: |
+          python -m pytest -v
 
   # ---------------------------------------------------------------------------
   # Secret scanning
