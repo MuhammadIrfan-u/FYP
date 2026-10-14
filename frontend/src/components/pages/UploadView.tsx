@@ -5,11 +5,17 @@ import {
   UploadCloud,
   FileVideo,
   Play,
+  Film,
+  Sliders,
   Trash2,
   RefreshCw,
   AlertCircle,
   CheckCircle2,
   Lock,
+  X,
+  Sparkles,
+  Clapperboard,
+  ArrowRight,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
@@ -21,6 +27,11 @@ export const UploadView: React.FC = () => {
     uploadFootballVideo,
     deleteSession,
     playSession,
+    startBackgroundSession,
+    confidenceThreshold,
+    setConfidenceThreshold,
+    classConfidences,
+    setClassConfidences,
     setActivePage,
     isUploading,
     uploadProgress,
@@ -34,6 +45,17 @@ export const UploadView: React.FC = () => {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Background 5s stream annotation setup modal state
+  const [modalVideo, setModalVideo] = useState<MatchVideo | null>(null);
+  const [modalGlobalConf, setModalGlobalConf] = useState<number>(0.25);
+  const [modalClassConfs, setModalClassConfs] = useState<Record<string, number>>({
+    'football goal': 0.35,
+    'football': 0.30,
+    'player': 0.25,
+    'player with ball': 0.25,
+  });
+  const [isStartingStream, setIsStartingStream] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,6 +143,26 @@ export const UploadView: React.FC = () => {
     setDeletingId(null);
   };
 
+  const handleOpenAnnotateModal = (video: MatchVideo) => {
+    setModalVideo(video);
+    setModalGlobalConf(confidenceThreshold || 0.25);
+    setModalClassConfs({
+      'football goal': classConfidences['football goal'] ?? 0.35,
+      'football': classConfidences['football'] ?? 0.30,
+      'player': classConfidences['player'] ?? 0.25,
+      'player with ball': classConfidences['player with ball'] ?? 0.25,
+    });
+  };
+
+  const handleStartBackgroundAnnotate = async () => {
+    if (!modalVideo) return;
+    setIsStartingStream(true);
+    setConfidenceThreshold(modalGlobalConf);
+    await startBackgroundSession(modalVideo, modalClassConfs);
+    setIsStartingStream(false);
+    setModalVideo(null);
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* Title & Subtitle banner */}
@@ -138,6 +180,33 @@ export const UploadView: React.FC = () => {
           <Lock className="w-3.5 h-3.5 text-[#16A34A]" />
           <span>Private bucket: <strong className="text-[#242424] font-mono">football-videos</strong></span>
         </div>
+      </div>
+
+      {/* Sync Training Videos Banner */}
+      <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#262626] text-white flex items-center justify-center shrink-0">
+            <Clapperboard className="w-4 h-4 text-[#16A34A]" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-[#242424]">Multi-Camera Training Synchronization</span>
+              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] border border-[#BBF7D0]">
+                NEW FEATURE
+              </span>
+            </div>
+            <p className="text-[11px] text-[#858585]">
+              Upload two camera angles (e.g. sideline and behind goal) with a clap sound to align them side-by-side.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => setActivePage('sync_training')}
+          className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#262626] text-white hover:bg-[#383838] transition-all flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+        >
+          <span>Sync Training Videos</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Status Messages */}
@@ -367,14 +436,24 @@ export const UploadView: React.FC = () => {
                       <StatusBadge status={vid.status} />
                     </div>
 
-                    {/* Play Video / View Results via Signed URL */}
+                    {/* Play Video / View Results via Signed URL (Live Mode) */}
                     <button
                       onClick={() => playSession(vid)}
                       className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all bg-[#262626] hover:bg-[#171717] text-white shadow-2xs cursor-pointer"
-                      title="Play video with short-lived signed URL"
+                      title="Play video with real-time live detection"
                     >
                       <Play className="w-3.5 h-3.5 fill-white" />
                       <span>Play & Inspect</span>
+                    </button>
+
+                    {/* Background 5s Chunked Video Inference */}
+                    <button
+                      onClick={() => handleOpenAnnotateModal(vid)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all bg-[#16A34A] hover:bg-[#15803D] text-white shadow-2xs cursor-pointer"
+                      title="Break video into 5-second subvideos, annotate in background, and stream progressively so you don't get bored"
+                    >
+                      <Film className="w-3.5 h-3.5 fill-white" />
+                      <span>5s Stream & Annotate</span>
                     </button>
 
                     {/* Delete Session Button */}
@@ -397,6 +476,223 @@ export const UploadView: React.FC = () => {
           </div>
         )}
       </section>
+
+      {/* 5s Chunked Background Stream & Per-Class Confidence Modal */}
+      {modalVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-6 relative max-h-[90vh] overflow-y-auto">
+            {/* Close button */}
+            <button
+              onClick={() => setModalVideo(null)}
+              className="absolute top-5 right-5 p-2 rounded-xl text-[#858585] hover:text-[#242424] hover:bg-[#EEEBE3] transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ECFDF5] border border-[#A7F3D0] text-[#065F46] text-xs font-semibold mb-2">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>5-Second Progressive Video Engine</span>
+              </div>
+              <h3 className="text-xl font-black text-[#242424] tracking-tight">
+                Background Video Annotation
+              </h3>
+              <p className="text-xs text-[#858585] mt-1">
+                Target session: <strong className="text-[#242424]">{modalVideo.matchName}</strong> ({modalVideo.filename})
+              </p>
+            </div>
+
+            {/* Concept callout */}
+            <div className="p-4 rounded-2xl bg-[#F0FDF4] border border-[#BBF7D0] text-xs text-[#166534] space-y-1.5">
+              <div className="font-bold flex items-center gap-1.5">
+                <Film className="w-4 h-4 text-[#16A34A]" />
+                <span>No Long Video Waiting (Chunked Streaming)</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-[#14532D]">
+                Big videos are partitioned into <strong>5-second subvideos</strong>. As soon as each 5s segment finishes YOLO tactical annotation in the background, it begins playing immediately so you never get bored waiting!
+              </p>
+            </div>
+
+            {/* Confidence Controls */}
+            <div className="space-y-4">
+              {/* Global Confidence Threshold */}
+              <div className="p-4 rounded-2xl bg-white border border-[#E8E3D8] space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-[#242424] flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-[#262626]" />
+                    <span>Global Confidence Threshold</span>
+                  </label>
+                  <span className="text-xs font-mono font-bold text-[#16A34A] px-2 py-0.5 rounded-lg bg-[#F0FDF4]">
+                    {Math.round(modalGlobalConf * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="0.95"
+                  step="0.05"
+                  value={modalGlobalConf}
+                  onChange={(e) => setModalGlobalConf(parseFloat(e.target.value))}
+                  className="w-full accent-[#16A34A] cursor-pointer"
+                />
+                <p className="text-[10px] text-[#858585]">
+                  Baseline threshold for detection candidates. Detections below this or class thresholds are discarded.
+                </p>
+              </div>
+
+              {/* Per-Class Confidence Thresholds */}
+              <div className="p-4 rounded-2xl bg-white border border-[#E8E3D8] space-y-3">
+                <div className="flex items-center justify-between border-b border-[#F0ECE4] pb-2">
+                  <span className="text-xs font-bold text-[#242424]">
+                    Per-Class Separate Confidences
+                  </span>
+                  <span className="text-[10px] font-mono text-[#858585]">
+                    Independent filters
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Football Goal (Requested 35%) */}
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#242424] flex items-center gap-1.5">
+                        <span>🥅</span> Football Goal
+                      </span>
+                      <span className="font-mono font-bold text-[#D97706] text-[11px]">
+                        {Math.round((modalClassConfs['football goal'] ?? 0.35) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      value={modalClassConfs['football goal'] ?? 0.35}
+                      onChange={(e) =>
+                        setModalClassConfs((prev) => ({
+                          ...prev,
+                          'football goal': parseFloat(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-[#D97706] cursor-pointer"
+                    />
+                    <div className="text-[9px] text-[#858585]">Discard goals &lt; {Math.round((modalClassConfs['football goal'] ?? 0.35) * 100)}%</div>
+                  </div>
+
+                  {/* Football (Ball) */}
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#242424] flex items-center gap-1.5">
+                        <span>⚽</span> Football (Ball)
+                      </span>
+                      <span className="font-mono font-bold text-[#16A34A] text-[11px]">
+                        {Math.round((modalClassConfs['football'] ?? 0.30) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      value={modalClassConfs['football'] ?? 0.30}
+                      onChange={(e) =>
+                        setModalClassConfs((prev) => ({
+                          ...prev,
+                          football: parseFloat(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-[#16A34A] cursor-pointer"
+                    />
+                    <div className="text-[9px] text-[#858585]">Discard ball &lt; {Math.round((modalClassConfs['football'] ?? 0.30) * 100)}%</div>
+                  </div>
+
+                  {/* Player */}
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#242424] flex items-center gap-1.5">
+                        <span>🏃</span> Player
+                      </span>
+                      <span className="font-mono font-bold text-[#2563EB] text-[11px]">
+                        {Math.round((modalClassConfs['player'] ?? 0.25) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      value={modalClassConfs['player'] ?? 0.25}
+                      onChange={(e) =>
+                        setModalClassConfs((prev) => ({
+                          ...prev,
+                          player: parseFloat(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-[#2563EB] cursor-pointer"
+                    />
+                    <div className="text-[9px] text-[#858585]">Discard players &lt; {Math.round((modalClassConfs['player'] ?? 0.25) * 100)}%</div>
+                  </div>
+
+                  {/* Player with Ball */}
+                  <div className="p-3 rounded-xl bg-[#FAF8F4] border border-[#E8E3D8] space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#242424] flex items-center gap-1.5">
+                        <span>👟⚽</span> Player with Ball
+                      </span>
+                      <span className="font-mono font-bold text-[#9333EA] text-[11px]">
+                        {Math.round((modalClassConfs['player with ball'] ?? 0.25) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      value={modalClassConfs['player with ball'] ?? 0.25}
+                      onChange={(e) =>
+                        setModalClassConfs((prev) => ({
+                          ...prev,
+                          'player with ball': parseFloat(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-[#9333EA] cursor-pointer"
+                    />
+                    <div className="text-[9px] text-[#858585]">Discard dribblers &lt; {Math.round((modalClassConfs['player with ball'] ?? 0.25) * 100)}%</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#E8E3D8]">
+              <button
+                onClick={() => setModalVideo(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-[#858585] hover:text-[#242424] hover:bg-[#EEEBE3] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleStartBackgroundAnnotate}
+                disabled={isStartingStream}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-[#16A34A] hover:bg-[#15803D] transition-all flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isStartingStream ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Launching Background Job...</span>
+                  </>
+                ) : (
+                  <>
+                    <Film className="w-4 h-4 fill-white" />
+                    <span>Start 5s Background Stream</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

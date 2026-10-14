@@ -22,7 +22,12 @@ import {
 } from '@/lib/mockData';
 import { useAuth } from '@/context/AuthContext';
 import { supabase, STORAGE_BUCKET_NAME, DatabaseSession } from '@/lib/supabase';
-import { uploadVideoToYOLO } from '@/lib/yoloApi';
+import {
+  uploadVideoToYOLO,
+  BackgroundAnnotationJob,
+  startBackgroundAnnotation,
+  getBackgroundJobStatus,
+} from '@/lib/yoloApi';
 
 interface AIChatMessage {
   id: string;
@@ -67,6 +72,17 @@ interface FootballContextType {
   sendAIChat: (message: string) => void;
   confidenceThreshold: number;
   setConfidenceThreshold: (val: number) => void;
+  classConfidences: Record<string, number>;
+  setClassConfidences: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  updateClassConfidence: (cls: string, val: number) => void;
+  activeBackgroundJob: BackgroundAnnotationJob | null;
+  setActiveBackgroundJob: (job: BackgroundAnnotationJob | null) => void;
+  analysisMode: 'live' | 'chunked';
+  setAnalysisMode: (mode: 'live' | 'chunked') => void;
+  startBackgroundSession: (
+    video: MatchVideo,
+    customClassConfs?: Record<string, number>
+  ) => Promise<BackgroundAnnotationJob | null>;
   activeVideoTab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw';
   setActiveVideoTab: (tab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw') => void;
   toastMessage: string | null;
@@ -113,6 +129,47 @@ const getVideoDuration = (file: File): Promise<number | null> => {
   });
 };
 
+const generateVideoThumbnail = (file: File): Promise<string | null> => {
+  return new Promise((resolve) => {
+    try {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
+      const url = URL.createObjectURL(file);
+      video.onloadeddata = () => {
+        video.currentTime = Math.min(1.0, (video.duration || 2) * 0.1);
+      };
+      video.onseeked = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const thumb = canvas.toDataURL('image/jpeg', 0.8);
+            URL.revokeObjectURL(url);
+            resolve(thumb);
+            return;
+          }
+        } catch {
+          // ignore error
+        }
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      video.src = url;
+    } catch {
+      resolve(null);
+    }
+  });
+};
+
 export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
 
@@ -132,6 +189,21 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [reports, setReports] = useState<ReportItem[]>(REPORTS_DATA);
   const [settings, setSettings] = useState<TeamProfileSettings>(DEFAULT_SETTINGS);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.25);
+  const [classConfidences, setClassConfidences] = useState<Record<string, number>>({
+    'football goal': 0.35,
+    'football': 0.30,
+    'player': 0.25,
+    'player with ball': 0.25,
+  });
+  const [activeBackgroundJob, setActiveBackgroundJob] = useState<BackgroundAnnotationJob | null>(null);
+  const [analysisMode, setAnalysisMode] = useState<'live' | 'chunked'>('chunked');
+
+  const updateClassConfidence = (cls: string, val: number) => {
+    setClassConfidences((prev) => ({
+      ...prev,
+      [cls]: val,
+    }));
+  };
   const [activeVideoTab, setActiveVideoTab] = useState<'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw'>('overview');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -278,17 +350,22 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       title?.trim() || file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
 
     try {
-      // 3. Extract duration if possible
-      const durationSec = await getVideoDuration(file);
+      // 3. Extract duration and real thumbnail from uploaded video
+      const [durationSec, capturedThumbnail] = await Promise.all([
+        getVideoDuration(file),
+        generateVideoThumbnail(file),
+      ]);
       const durationStr = formatDuration(durationSec);
       setUploadProgress(35);
 
       // 4. Upload to local YOLO backend
       let backendVideoUrl: string | undefined = undefined;
+      let backendSavedName: string | undefined = undefined;
       try {
         const yoloRes = await uploadVideoToYOLO(file);
         if (yoloRes && yoloRes.success) {
           backendVideoUrl = yoloRes.video_url;
+          backendSavedName = yoloRes.saved_name;
         }
       } catch (backendErr) {
         console.warn('Local YOLO backend upload notice:', backendErr);
@@ -325,11 +402,11 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       setUploadProgress(100);
 
-      // 6. Create session video object
-      const fallbackUrl = backendVideoUrl || URL.createObjectURL(file);
+      // 6. Create session video object using local blob for instant zero-latency playback
+      const localBlobUrl = URL.createObjectURL(file);
       const newVideo: MatchVideo = {
         id: sessionId,
-        filename: file.name,
+        filename: backendSavedName || file.name,
         matchName: sessionTitle,
         date: new Date().toLocaleDateString('en-US', {
           month: 'short',
@@ -340,9 +417,10 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
         status: 'Uploaded',
         progress: 100,
-        thumbnail: '/match_tactical_frame.jpg',
-        videoUrl: fallbackUrl,
+        thumbnail: capturedThumbnail || localBlobUrl,
+        videoUrl: localBlobUrl,
         videoPath: storagePath,
+        savedFilename: backendSavedName,
         detections: { players: 0, ball: 0, goals: 0, referee: 0 },
         modelConfidence: 94.2,
         metrics: { passes: 0, shots: 0, dribbles: 0, sprints: 0 },
@@ -427,7 +505,7 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Open a session and play via short-lived signed URL
+  // Open a session and play via short-lived signed URL (Live Camera / Canvas Mode)
   const playSession = async (video: MatchVideo) => {
     const videoWithUrl: MatchVideo = { ...video };
 
@@ -456,8 +534,76 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }
 
+    setAnalysisMode('live');
     setActiveVideo(videoWithUrl);
     setActivePage('analysis');
+  };
+
+  // Start background chunked video session (5-second progressive streams)
+  const startBackgroundSession = async (
+    video: MatchVideo,
+    customClassConfs?: Record<string, number>
+  ): Promise<BackgroundAnnotationJob | null> => {
+    const videoWithUrl: MatchVideo = { ...video };
+
+    if (video.videoPath) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET_NAME)
+          .createSignedUrl(video.videoPath, 3600);
+
+        if (!error && data?.signedUrl) {
+          videoWithUrl.videoUrl = data.signedUrl;
+        }
+      } catch (err) {
+        console.warn('Signed URL request exception:', err);
+      }
+    }
+
+    if (!videoWithUrl.videoUrl) {
+      if (video.filename && !video.filename.includes('dynamo')) {
+        videoWithUrl.videoUrl = `http://127.0.0.1:8000/api/videos/${video.filename}`;
+      } else {
+        videoWithUrl.videoUrl = '/football_match_demo.mp4';
+      }
+    }
+
+    const effectiveConfs = customClassConfs || classConfidences;
+    if (customClassConfs) {
+      setClassConfidences(customClassConfs);
+    }
+
+    setAnalysisMode('chunked');
+    setActiveVideo(videoWithUrl);
+
+    const targetFilename = video.savedFilename || video.filename;
+    const targetUrl = video.savedFilename
+      ? `http://127.0.0.1:8000/api/videos/${video.savedFilename}`
+      : (videoWithUrl.videoUrl?.startsWith('blob:') ? undefined : videoWithUrl.videoUrl);
+
+    try {
+      showToast('Launching 5s progressive background annotation on uploaded video...');
+      const res = await startBackgroundAnnotation({
+        videoFilename: targetFilename,
+        videoUrl: targetUrl,
+        chunkDuration: 5.0,
+        confidenceThreshold: confidenceThreshold,
+        classConfidences: effectiveConfs,
+        burnBoxes: true,
+      });
+
+      if (res && res.success) {
+        const initialJob = await getBackgroundJobStatus(res.job_id);
+        setActiveBackgroundJob(initialJob);
+        setActivePage('analysis');
+        return initialJob;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Backend connection notice';
+      showToast(`Notice: ${msg}. Switching to player.`);
+      setActivePage('analysis');
+    }
+    return null;
   };
 
   const simulateUpload = (fileName: string, fileSize: string) => {
@@ -607,6 +753,14 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         sendAIChat,
         confidenceThreshold,
         setConfidenceThreshold,
+        classConfidences,
+        setClassConfidences,
+        updateClassConfidence,
+        activeBackgroundJob,
+        setActiveBackgroundJob,
+        analysisMode,
+        setAnalysisMode,
+        startBackgroundSession,
         activeVideoTab,
         setActiveVideoTab,
         toastMessage,

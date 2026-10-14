@@ -8,6 +8,7 @@ import { MobileDrawer } from '@/components/layout/MobileDrawer';
 import { DashboardView } from '@/components/pages/DashboardView';
 import { UploadView } from '@/components/pages/UploadView';
 import { AnalysisView } from '@/components/pages/AnalysisView';
+import { SyncTrainingView } from '@/components/pages/SyncTrainingView';
 import { MatchEventsView } from '@/components/pages/MatchEventsView';
 import { ReportsView } from '@/components/pages/ReportsView';
 import { SettingsView } from '@/components/pages/SettingsView';
@@ -24,6 +25,8 @@ export const DashboardShell: React.FC = () => {
         return <UploadView />;
       case 'analysis':
         return <AnalysisView />;
+      case 'sync_training':
+        return <SyncTrainingView />;
       case 'events':
         return <MatchEventsView />;
       case 'reports':
