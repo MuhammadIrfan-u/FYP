@@ -1,14 +1,11 @@
 import numpy as np
-import pytest
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from app.main import app
 from app.services.video_sync import (
+    compute_cross_correlation_offset,
     compute_waveform_envelope,
     detect_clap_transient,
-    compute_cross_correlation_offset,
-    synchronize_two_videos,
 )
 
 client = TestClient(app)

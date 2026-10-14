@@ -1,7 +1,5 @@
-import json
 import logging
 import math
-import os
 import shutil
 import subprocess
 import threading
@@ -15,9 +13,11 @@ import numpy as np
 
 try:
     import imageio_ffmpeg
+
     FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-except Exception:
+except Exception:  # noqa: BLE001
     FFMPEG_EXE = "ffmpeg"
+
 
 logger = logging.getLogger("video_annotator")
 
@@ -27,10 +27,10 @@ JOBS_LOCK = threading.Lock()
 
 # Tactical BGR colors for each class
 CLASS_COLORS: dict[str, tuple[int, int, int]] = {
-    "player": (110, 235, 131),         # Emerald green
-    "football": (0, 215, 255),         # Electric yellow/gold
-    "football goal": (34, 126, 255),   # Vibrant orange
-    "player with ball": (255, 90, 220), # Magenta / neon purple
+    "player": (110, 235, 131),  # Emerald green
+    "football": (0, 215, 255),  # Electric yellow/gold
+    "football goal": (34, 126, 255),  # Vibrant orange
+    "player with ball": (255, 90, 220),  # Magenta / neon purple
 }
 DEFAULT_COLOR = (200, 200, 200)
 
@@ -58,7 +58,9 @@ def draw_hud_header(
     cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
     # Status text
-    chunk_info = f"5s CHUNK {chunk_idx + 1}/{total_chunks} [{start_sec:.1f}s - {end_sec:.1f}s]"
+    chunk_info = (
+        f"5s CHUNK {chunk_idx + 1}/{total_chunks} [{start_sec:.1f}s - {end_sec:.1f}s]"
+    )
     stats_info = (
         f"Players: {counts.get('player', 0)} | "
         f"Ball: {counts.get('football', 0)} | "
@@ -83,7 +85,9 @@ def draw_hud_header(
     )
 
     # Right indicator
-    (text_w, _), _ = cv2.getTextSize(stats_info, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+    (text_w, _), _ = cv2.getTextSize(
+        stats_info, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+    )
     right_x = max(w - text_w - 16, w // 2)
     cv2.putText(
         frame,
@@ -108,10 +112,10 @@ def draw_detection_box(
     w_pct = det.get("w", 0.0)
     h_pct = det.get("h", 0.0)
 
-    x1 = int(round((x_pct / 100.0) * w))
-    y1 = int(round((y_pct / 100.0) * h))
-    x2 = int(round(((x_pct + w_pct) / 100.0) * w))
-    y2 = int(round(((y_pct + h_pct) / 100.0) * h))
+    x1 = round((x_pct / 100.0) * w)
+    y1 = round((y_pct / 100.0) * h)
+    x2 = round(((x_pct + w_pct) / 100.0) * w)
+    y2 = round(((y_pct + h_pct) / 100.0) * h)
 
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w - 1, x2), min(h - 1, y2)
@@ -141,7 +145,9 @@ def draw_detection_box(
     label_text = f"{cls_name.capitalize()} {int(conf * 100)}%"
     font_scale = max(0.35, min(0.65, w / 2400.0))
     thickness = 1
-    (lbl_w, lbl_h), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+    (lbl_w, lbl_h), _baseline = cv2.getTextSize(
+        label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+    )
 
     badge_y1 = max(0, y1 - lbl_h - 8)
     badge_y2 = y1
@@ -175,16 +181,26 @@ def encode_chunk_ffmpeg(
     cmd = [
         FFMPEG_EXE,
         "-y",
-        "-f", "rawvideo",
-        "-vcodec", "rawvideo",
-        "-s", f"{width}x{height}",
-        "-pix_fmt", "bgr24",
-        "-r", str(fps),
-        "-i", "-",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-s",
+        f"{width}x{height}",
+        "-pix_fmt",
+        "bgr24",
+        "-r",
+        str(fps),
+        "-i",
+        "-",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         str(output_path),
     ]
 
@@ -197,8 +213,12 @@ def encode_chunk_ffmpeg(
             stderr=subprocess.DEVNULL,
         )
         proc.communicate(input=raw_data, timeout=30)
-        return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
-    except Exception as e:
+        return (
+            proc.returncode == 0
+            and output_path.exists()
+            and output_path.stat().st_size > 0
+        )
+    except Exception as e:  # noqa: BLE001
         logger.error(f"FFmpeg encoding error for {output_path}: {e}")
         return False
 
@@ -211,24 +231,38 @@ def concatenate_chunks_ffmpeg(
     list_file = output_path.parent / "concat_list.txt"
     try:
         with open(list_file, "w", encoding="utf-8") as f:
-            for p in chunk_paths:
-                f.write(f"file '{p.name}'\n")
+            f.writelines(f"file '{p.name}'\n" for p in chunk_paths)
 
         cmd = [
             FFMPEG_EXE,
             "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(list_file),
-            "-c", "copy",
-            "-movflags", "+faststart",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
             str(output_path),
         ]
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        res = subprocess.run(
+            cmd,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
         if list_file.exists():
             list_file.unlink()
-        return res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
-    except Exception as e:
+        return (
+            res.returncode == 0
+            and output_path.exists()
+            and output_path.stat().st_size > 0
+        )
+    except Exception as e:  # noqa: BLE001
         logger.error(f"FFmpeg concatenate error for {output_path}: {e}")
         if list_file.exists():
             list_file.unlink()
@@ -260,8 +294,12 @@ def run_chunked_annotation_worker(
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
         duration_sec = total_frames / fps if fps > 0 else 0.0
 
-        chunk_frames_target = max(1, int(round(fps * chunk_duration_sec)))
-        total_chunks = max(1, math.ceil(total_frames / chunk_frames_target)) if total_frames > 0 else 1
+        chunk_frames_target = max(1, round(fps * chunk_duration_sec))
+        total_chunks = (
+            max(1, math.ceil(total_frames / chunk_frames_target))
+            if total_frames > 0
+            else 1
+        )
 
         with JOBS_LOCK:
             if job_id in JOBS:
@@ -289,7 +327,7 @@ def run_chunked_annotation_worker(
             # Read frames for this chunk
             frames_in_this_chunk = 0
             # Sample inference ~3 times per second so 5s chunks complete rapidly (~12s) without boring viewers
-            infer_interval = max(1, int(round(fps / 3.0)))
+            infer_interval = max(1, round(fps / 3.0))
             latest_parsed = {"detections": [], "class_counts": {}}
 
             while frames_in_this_chunk < chunk_frames_target:
@@ -298,7 +336,9 @@ def run_chunked_annotation_worker(
                     break
 
                 # YOLO model inference on sampled intervals
-                if (frames_in_this_chunk % infer_interval == 0) and (model_obj is not None):
+                if (frames_in_this_chunk % infer_interval == 0) and (
+                    model_obj is not None
+                ):
                     try:
                         results = model_obj(frame, imgsz=480, verbose=False)
                         latest_parsed = parse_detections_fn(
@@ -306,7 +346,7 @@ def run_chunked_annotation_worker(
                             conf_threshold=confidence_threshold,
                             class_confidences=class_confidences,
                         )
-                    except Exception as model_err:
+                    except Exception as model_err:  # noqa: BLE001
                         logger.warning(f"Model inference exception: {model_err}")
                         latest_parsed = {"detections": [], "class_counts": {}}
 
@@ -370,7 +410,9 @@ def run_chunked_annotation_worker(
                         JOBS[job_id]["chunks"].append(chunk_info)
                         JOBS[job_id]["completed_chunks"] = len(JOBS[job_id]["chunks"])
                         JOBS[job_id]["progress_percent"] = round(
-                            (JOBS[job_id]["completed_chunks"] / max(1, total_chunks)) * 100, 1
+                            (JOBS[job_id]["completed_chunks"] / max(1, total_chunks))
+                            * 100,
+                            1,
                         )
                         JOBS[job_id]["current_chunk_processing"] = chunk_idx + 1
 
@@ -409,7 +451,7 @@ def run_chunked_annotation_worker(
         logger.info(f"Job {job_id} completely finished with {len(chunk_files)} chunks!")
 
     except Exception as e:
-        logger.error(f"Job {job_id} failed with error: {e}", exc_info=True)
+        logger.exception(f"Job {job_id} failed")
         with JOBS_LOCK:
             if job_id in JOBS:
                 JOBS[job_id]["status"] = "failed"

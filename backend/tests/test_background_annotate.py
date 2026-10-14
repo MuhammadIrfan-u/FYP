@@ -1,6 +1,5 @@
 import json
-import numpy as np
-import pytest
+
 from app.main import parse_detections
 from tests.conftest import MockBox, MockYOLOResult
 
@@ -20,20 +19,26 @@ def test_parse_detections_per_class_confidence_thresholds():
     # 6. player with conf 0.27 (kept)
     boxes = [
         MockBox(cls_id=1, conf=0.32, xywhn=[0.8, 0.2, 0.2, 0.3]),  # goal 32%
-        MockBox(cls_id=1, conf=0.38, xywhn=[0.85, 0.25, 0.15, 0.25]), # goal 38%
+        MockBox(cls_id=1, conf=0.38, xywhn=[0.85, 0.25, 0.15, 0.25]),  # goal 38%
         MockBox(cls_id=0, conf=0.28, xywhn=[0.5, 0.5, 0.1, 0.1]),  # football 28%
-        MockBox(cls_id=0, conf=0.34, xywhn=[0.52, 0.52, 0.1, 0.1]), # football 34%
+        MockBox(cls_id=0, conf=0.34, xywhn=[0.52, 0.52, 0.1, 0.1]),  # football 34%
         MockBox(cls_id=2, conf=0.22, xywhn=[0.2, 0.3, 0.15, 0.4]),  # player 22%
-        MockBox(cls_id=2, conf=0.27, xywhn=[0.25, 0.35, 0.15, 0.4]), # player 27%
+        MockBox(cls_id=2, conf=0.27, xywhn=[0.25, 0.35, 0.15, 0.4]),  # player 27%
     ]
     res = [MockYOLOResult(boxes)]
 
     # Mock class names
     from unittest.mock import MagicMock
+
     from app import main
 
     mock_model = MagicMock()
-    mock_model.names = {0: "football", 1: "football goal", 2: "player", 3: "player with ball"}
+    mock_model.names = {
+        0: "football",
+        1: "football goal",
+        2: "player",
+        3: "player with ball",
+    }
     main.model = mock_model
 
     class_confs = {
@@ -75,7 +80,9 @@ def test_background_annotate_endpoint_contract(client):
         "video_filename": "football_match_demo.mp4",
         "chunk_duration": "5.0",
         "confidence_threshold": "0.25",
-        "class_confidences": json.dumps({"football goal": 0.35, "football": 0.30, "player": 0.25}),
+        "class_confidences": json.dumps(
+            {"football goal": 0.35, "football": 0.30, "player": 0.25}
+        ),
         "burn_boxes": "true",
     }
     response = client.post("/api/background-annotate", data=payload)

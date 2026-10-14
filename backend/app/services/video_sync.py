@@ -1,19 +1,24 @@
 import logging
-import math
 import shutil
 import subprocess
-import uuid
 from pathlib import Path
 from typing import Any
 
-import imageio_ffmpeg
 import numpy as np
 
 logger = logging.getLogger(__name__)
-FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+
+try:
+    import imageio_ffmpeg
+
+    FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
+except Exception:  # noqa: BLE001
+    FFMPEG_EXE = shutil.which("ffmpeg") or "ffmpeg"
 
 
-def extract_mono_audio(video_path: Path, sample_rate: int = 16000) -> tuple[np.ndarray, float]:
+def extract_mono_audio(
+    video_path: Path, sample_rate: int = 16000
+) -> tuple[np.ndarray, float]:
     """Extracts 16-bit mono PCM audio from video using FFmpeg.
 
     Returns (audio_samples_float32, duration_seconds).
@@ -24,11 +29,15 @@ def extract_mono_audio(video_path: Path, sample_rate: int = 16000) -> tuple[np.n
     cmd = [
         FFMPEG_EXE,
         "-y",
-        "-i", str(video_path),
+        "-i",
+        str(video_path),
         "-vn",
-        "-ac", "1",
-        "-ar", str(sample_rate),
-        "-f", "s16le",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "s16le",
         "-",
     ]
 
@@ -45,7 +54,7 @@ def extract_mono_audio(video_path: Path, sample_rate: int = 16000) -> tuple[np.n
         samples = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32)
         duration = len(samples) / float(sample_rate)
         return samples, duration
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"Audio extraction failed for {video_path}: {e}")
         return np.zeros(0, dtype=np.float32), 0.0
 
@@ -75,7 +84,9 @@ def compute_waveform_envelope(
     return normalized
 
 
-def detect_clap_transient(audio: np.ndarray, sample_rate: int = 16000) -> dict[str, Any]:
+def detect_clap_transient(
+    audio: np.ndarray, sample_rate: int = 16000
+) -> dict[str, Any]:
     """Detects sharp audio transient clap spike in the audio track.
 
     A clap is characterized by a high sudden jump in energy and peak loudness
@@ -150,7 +161,9 @@ def detect_clap_transient(audio: np.ndarray, sample_rate: int = 16000) -> dict[s
 
     # Scan from the very beginning of the video (t = 0) to find the FIRST loudest sound event
     # with a sharp attack transient
-    candidate_indices = np.where((search_loudness >= loud_threshold) & (search_diff > 0.015))[0]
+    candidate_indices = np.where(
+        (search_loudness >= loud_threshold) & (search_diff > 0.015)
+    )[0]
 
     if len(candidate_indices) > 0:
         first_hop = int(candidate_indices[0])
@@ -184,7 +197,10 @@ def detect_clap_transient(audio: np.ndarray, sample_rate: int = 16000) -> dict[s
 
 
 def compute_cross_correlation_offset(
-    audio_a: np.ndarray, audio_b: np.ndarray, sample_rate: int = 16000, max_offset_sec: float = 15.0
+    audio_a: np.ndarray,
+    audio_b: np.ndarray,
+    sample_rate: int = 16000,
+    max_offset_sec: float = 15.0,
 ) -> float:
     """Computes cross-correlation between energy envelopes to find temporal offset.
 
@@ -195,8 +211,12 @@ def compute_cross_correlation_offset(
 
     # Downsample envelope to 100 Hz (10ms steps)
     hop = int(sample_rate * 0.01)
-    env_a = np.array([np.mean(np.abs(audio_a[i : i + hop])) for i in range(0, len(audio_a), hop)])
-    env_b = np.array([np.mean(np.abs(audio_b[i : i + hop])) for i in range(0, len(audio_b), hop)])
+    env_a = np.array(
+        [np.mean(np.abs(audio_a[i : i + hop])) for i in range(0, len(audio_a), hop)]
+    )
+    env_b = np.array(
+        [np.mean(np.abs(audio_b[i : i + hop])) for i in range(0, len(audio_b), hop)]
+    )
 
     # Normalize
     env_a = env_a - np.mean(env_a)
@@ -358,8 +378,16 @@ def render_side_by_side_video(
     # Construct FFmpeg filter complex:
     # Scale both inputs to half_width x height
     # Apply tpad to whichever video started later
-    pad_a = f",tpad=start_duration={start_delay_a}:start_mode=add:color=black" if start_delay_a > 0.02 else ""
-    pad_b = f",tpad=start_duration={start_delay_b}:start_mode=add:color=black" if start_delay_b > 0.02 else ""
+    pad_a = (
+        f",tpad=start_duration={start_delay_a}:start_mode=add:color=black"
+        if start_delay_a > 0.02
+        else ""
+    )
+    pad_b = (
+        f",tpad=start_duration={start_delay_b}:start_mode=add:color=black"
+        if start_delay_b > 0.02
+        else ""
+    )
 
     filter_complex = (
         f"[0:v]scale={half_width}:{height}:force_original_aspect_ratio=decrease,pad={half_width}:{height}:(ow-iw)/2:(oh-ih)/2{pad_a}[v0];"
@@ -370,22 +398,40 @@ def render_side_by_side_video(
     cmd = [
         FFMPEG_EXE,
         "-y",
-        "-i", str(video_a_path),
-        "-i", str(video_b_path),
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        "-t", "60",  # preview render duration
+        "-i",
+        str(video_a_path),
+        "-i",
+        str(video_b_path),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[vout]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-t",
+        "60",  # preview render duration
         str(output_path),
     ]
 
     try:
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        return res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
-    except Exception as e:
+        res = subprocess.run(
+            cmd,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+        return (
+            res.returncode == 0
+            and output_path.exists()
+            and output_path.stat().st_size > 0
+        )
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to render side-by-side video: {e}")
         return False
-

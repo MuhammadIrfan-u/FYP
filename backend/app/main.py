@@ -122,7 +122,9 @@ def parse_detections(
         effective_threshold = conf_threshold
         if class_confidences:
             for k, v in class_confidences.items():
-                if k.lower().strip() == cls_name.lower().strip() or str(k) == str(cls_id):
+                if k.lower().strip() == cls_name.lower().strip() or str(k) == str(
+                    cls_id
+                ):
                     effective_threshold = float(v)
                     break
 
@@ -229,9 +231,14 @@ async def analyze_frame(raw_request: Request):
             cls_conf_field = form.get("class_confidences")
             if cls_conf_field:
                 try:
-                    class_confidences = json.loads(cls_conf_field) if isinstance(cls_conf_field, str) else cls_conf_field
-                except Exception:
-                    pass
+                    class_confidences = (
+                        json.loads(cls_conf_field)
+                        if isinstance(cls_conf_field, str)
+                        else cls_conf_field
+                    )
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    class_confidences = None
+
             if file_field and hasattr(file_field, "read"):
                 contents = await file_field.read()
                 nparr = np.frombuffer(contents, np.uint8)
@@ -270,9 +277,11 @@ async def analyze_frame(raw_request: Request):
     min_conf = confidence_threshold
     if class_confidences and isinstance(class_confidences, dict):
         try:
-            min_conf = min(confidence_threshold, *[float(v) for v in class_confidences.values()])
-        except Exception:
-            pass
+            min_conf = min(
+                confidence_threshold, *[float(v) for v in class_confidences.values()]
+            )
+        except (ValueError, TypeError):
+            min_conf = confidence_threshold
 
     # Run YOLO inference with optimized input resolution (imgsz=480 for realtime speed)
     results = model(img_bgr, imgsz=480, conf=min_conf, verbose=False)
@@ -348,8 +357,8 @@ def analyze_video(
                 if isinstance(class_confidences, str)
                 else class_confidences
             )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, TypeError):
+            parsed_class_confidences = None
 
     # Determine video file path
     video_path = None
@@ -396,10 +405,11 @@ def analyze_video(
     if parsed_class_confidences and isinstance(parsed_class_confidences, dict):
         try:
             min_conf = min(
-                confidence_threshold, *[float(v) for v in parsed_class_confidences.values()]
+                confidence_threshold,
+                *[float(v) for v in parsed_class_confidences.values()],
             )
-        except Exception:
-            pass
+        except (ValueError, TypeError):
+            min_conf = confidence_threshold
 
     while True:
         ret, frame = cap.read()
@@ -484,7 +494,7 @@ def start_background_annotation(
             )
             if isinstance(custom_confs, dict):
                 parsed_class_confidences.update(custom_confs)
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(f"Could not parse class_confidences: {e}")
 
     # 2. Resolve source video file path prioritizing uploaded videos
@@ -499,12 +509,11 @@ def start_background_annotation(
             shutil.copyfileobj(file.file, buffer)
 
     # Check video_url (e.g. http://127.0.0.1:8000/api/videos/video_...)
-    if not target_video_path and video_url:
-        if "/api/videos/" in video_url:
-            fname = video_url.split("/api/videos/")[-1].split("?")[0]
-            candidate = UPLOADS_DIR / fname
-            if candidate.exists():
-                target_video_path = candidate
+    if not target_video_path and video_url and "/api/videos/" in video_url:
+        fname = video_url.split("/api/videos/")[-1].split("?")[0]
+        candidate = UPLOADS_DIR / fname
+        if candidate.exists():
+            target_video_path = candidate
 
     # Check video_filename
     if not target_video_path and video_filename:
@@ -521,27 +530,39 @@ def start_background_annotation(
         # Fuzzy match filename in UPLOADS_DIR if exact match wasn't found
         if not target_video_path:
             clean_stem = Path(video_filename).stem.lower().replace(" ", "_")
-            for f in sorted(UPLOADS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True):
-                if not f.name.startswith("chunk_") and not f.name.startswith("full_") and not f.name.startswith("test_"):
-                    if clean_stem in f.name.lower() or f.name.lower() in clean_stem:
-                        target_video_path = f
-                        break
+            for f in sorted(
+                UPLOADS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True
+            ):
+                if not f.name.startswith(("chunk_", "full_", "test_")) and (
+                    clean_stem in f.name.lower() or f.name.lower() in clean_stem
+                ):
+                    target_video_path = f
+                    break
 
     # Remote URL download (e.g. Supabase storage signed URL)
-    if not target_video_path and video_url and (video_url.startswith("http://") or video_url.startswith("https://")):
+    if (
+        not target_video_path
+        and video_url
+        and video_url.startswith(("http://", "https://"))
+    ):
         if "football_match_demo" in video_url:
-            local_demo = BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
+            local_demo = (
+                BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
+            )
             if local_demo.exists():
                 target_video_path = local_demo
-        elif not video_url.startswith("http://127.0.0.1") and not video_url.startswith("http://localhost"):
+        elif not video_url.startswith("http://127.0.0.1") and not video_url.startswith(
+            "http://localhost"
+        ):
             try:
                 import urllib.request
+
                 temp_name = f"remote_{uuid.uuid4().hex[:8]}.mp4"
                 temp_path = UPLOADS_DIR / temp_name
                 urllib.request.urlretrieve(video_url, str(temp_path))
                 if temp_path.exists() and temp_path.stat().st_size > 0:
                     target_video_path = temp_path
-            except Exception as dl_err:
+            except Exception as dl_err:  # noqa: BLE001
                 logger.warning(f"Could not download remote video URL: {dl_err}")
 
     # Fallback to most recently uploaded session video in UPLOADS_DIR
@@ -559,10 +580,14 @@ def start_background_annotation(
         )
         if uploaded_videos:
             target_video_path = uploaded_videos[0]
-            logger.info(f"Targeting most recently uploaded user video: {target_video_path.name}")
+            logger.info(
+                f"Targeting most recently uploaded user video: {target_video_path.name}"
+            )
 
     if not target_video_path or not target_video_path.exists():
-        demo_candidate = BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
+        demo_candidate = (
+            BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
+        )
         if demo_candidate.exists():
             target_video_path = demo_candidate
         else:
@@ -618,8 +643,8 @@ class RenderSyncRequest(BaseModel):
 
 @app.post("/api/sync-training-videos")
 def sync_training_videos_endpoint(
-    file_a: UploadFile | None = File(None),
-    file_b: UploadFile | None = File(None),
+    file_a: UploadFile | None = File(None),  # noqa: B008
+    file_b: UploadFile | None = File(None),  # noqa: B008
     video_a_filename: str | None = Form(None),
     video_b_filename: str | None = Form(None),
 ):
@@ -675,7 +700,9 @@ def sync_training_videos_endpoint(
     demo_fallback = BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
     uploaded_mps = [
         f
-        for f in sorted(UPLOADS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for f in sorted(
+            UPLOADS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
         if not f.name.startswith("chunk_")
         and not f.name.startswith("full_")
         and not f.name.startswith("synced_")
@@ -733,7 +760,9 @@ def render_synced_video_endpoint(req: RenderSyncRequest):
             break
 
     if not path_a.exists() or not path_b.exists():
-        raise HTTPException(status_code=404, detail="One or both video sources could not be located.")
+        raise HTTPException(
+            status_code=404, detail="One or both video sources could not be located."
+        )
 
     render_name = f"synced_{uuid.uuid4().hex[:8]}.mp4"
     output_path = SYNC_DIR / render_name
@@ -747,7 +776,9 @@ def render_synced_video_endpoint(req: RenderSyncRequest):
         start_delay_b=req.start_delay_b,
     )
     if not ok or not output_path.exists():
-        raise HTTPException(status_code=500, detail="Failed to render side-by-side synced video.")
+        raise HTTPException(
+            status_code=500, detail="Failed to render side-by-side synced video."
+        )
 
     rel_url = f"/api/videos/sync_sessions/{render_name}"
     return {
