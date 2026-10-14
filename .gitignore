@@ -7,6 +7,16 @@ __pycache__/
 *.pyd
 .pytest_cache/
 *.egg-info/
+.coverage
+.coverage.*
+coverage.xml
+coverage_html/
+htmlcov/
+reports/
+jscpd-report/
+.semgrep/
+semgrep.sarif
+
 
 # Environment Variables
 .env
