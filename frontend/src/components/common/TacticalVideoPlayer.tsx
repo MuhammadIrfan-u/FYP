@@ -21,6 +21,7 @@ interface TacticalVideoPlayerProps {
   matchName?: string;
   duration?: string;
   confidenceThreshold?: number;
+  classConfidences?: Record<string, number>;
   timeline?: YOLOTimeline;
   modelName?: string;
   onEventClick?: (time: string) => void;
@@ -39,6 +40,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   matchName = 'Football Session',
   duration = '00:10',
   confidenceThreshold = 0.25,
+  classConfidences,
   timeline,
   modelName = 'best_5.onnx',
   onDetectionsUpdate,
@@ -82,10 +84,12 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     }
   }, [videoUrl]);
 
-  // Filter boxes by confidence threshold
+  // Filter boxes by confidence threshold (incorporating per-class confidence if provided)
   const visibleBoxes: DetectionBox[] = currentBoxes.filter((box) => {
     if (!showBoxes) return false;
-    return (box.confidence ?? 0) >= (confidenceThreshold ?? 0.25);
+    const cls = box.class?.toLowerCase().trim() || '';
+    const classThresh = classConfidences?.[cls] ?? confidenceThreshold ?? 0.25;
+    return (box.confidence ?? 0) >= classThresh;
   });
 
   // Extract frame from HTML5 video or fallback tactical image and run YOLO inference
@@ -146,7 +150,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
       if (!dataUrl) return;
 
-      const res = await analyzeFrameWithYOLO(dataUrl, confidenceThreshold);
+      const res = await analyzeFrameWithYOLO(dataUrl, confidenceThreshold, classConfidences);
 
       if (res && res.success) {
         setInferenceError(null);
@@ -449,10 +453,15 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
             src={videoUrl}
             className="w-full h-full object-contain"
             playsInline
-            crossOrigin="anonymous"
+            crossOrigin={videoUrl && !videoUrl.startsWith('blob:') ? 'anonymous' : undefined}
             onError={() => {
-              console.warn('Video element source failed to load, switching to tactical view');
-              setVideoHasError(true);
+              console.warn('Video element source failed to load, checking fallback...');
+              if (videoRef.current && videoRef.current.crossOrigin) {
+                videoRef.current.removeAttribute('crossorigin');
+                videoRef.current.load();
+              } else {
+                setVideoHasError(true);
+              }
             }}
             onTimeUpdate={handleVideoTimeUpdate}
             onLoadedMetadata={handleVideoLoadedMetadata}

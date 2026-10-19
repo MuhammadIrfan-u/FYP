@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   UploadCloud,
   Cpu,
+  Clapperboard,
   Activity,
   FileText,
   Settings,
@@ -28,9 +29,8 @@ export const Sidebar: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'upload', label: 'Upload Video', icon: UploadCloud },
     { id: 'analysis', label: 'Video Analysis', icon: Cpu, badge: 'YOLO' },
-
+    { id: 'sync_training', label: 'Sync Training Videos', icon: Clapperboard, badge: 'NEW' },
     { id: 'events', label: 'Match Events', icon: Activity },
-
     { id: 'reports', label: 'Reports', icon: FileText },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];

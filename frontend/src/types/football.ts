@@ -2,6 +2,7 @@ export type PageId =
   | 'dashboard'
   | 'upload'
   | 'analysis'
+  | 'sync_training'
   | 'events'
   | 'reports'
   | 'settings';
@@ -68,6 +69,7 @@ export interface MatchVideo {
   };
   videoPath?: string;
   videoUrl?: string;
+  savedFilename?: string;
   userId?: string;
   rawDurationSeconds?: number;
 }
@@ -196,3 +198,30 @@ export interface TeamProfileSettings {
   frameSamplingRate: number;
   alertOnHighFatigue: boolean;
 }
+
+export interface SyncVideoChannel {
+  name: string;
+  filename: string;
+  video_url: string;
+  duration: number;
+  clap_time: number;
+  has_clap: boolean;
+  start_delay?: number;
+  waveform: number[];
+}
+
+export interface SyncTrainingResult {
+  success: boolean;
+  sync_id: string;
+  video_a: SyncVideoChannel;
+  video_b: SyncVideoChannel;
+  started_first?: 'video_a' | 'video_b' | 'same_time';
+  start_difference?: number;
+  master_clap_time?: number;
+  total_master_duration?: number;
+  offset_seconds: number;
+  sync_method: 'first_loudest_clap' | 'clap_transient' | 'cross_correlation' | 'default';
+  confidence: number;
+  message: string;
+}
+

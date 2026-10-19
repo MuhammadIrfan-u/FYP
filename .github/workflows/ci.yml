@@ -100,10 +100,10 @@ jobs:
         continue-on-error: true
 
   # ---------------------------------------------------------------------------
-  # Backend Tests (FastAPI / pytest): automated non-interactive test suite
+  # Backend Tests (FastAPI / pytest): automated test suite + coverage artifacts
   # ---------------------------------------------------------------------------
   backend-tests:
-    name: Backend Tests (pytest)
+    name: Backend Tests & Coverage (pytest)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -124,9 +124,138 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-test.txt
 
-      - name: Run backend tests
+      - name: Run backend tests with coverage
         run: |
-          python -m pytest -v
+          python -m pytest --cov=app --cov-report=html:coverage_html --cov-report=xml:coverage.xml --cov-report=term
+
+      - name: Publish Coverage to Job Summary
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            echo "## 🧪 Backend Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            python -m coverage report >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-report
+          path: |
+            backend/coverage_html/
+            backend/coverage.xml
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Semantic Rule Analysis (Semgrep)
+  # ---------------------------------------------------------------------------
+  semgrep:
+    name: Semantic Rule Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep OSS
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/default
+            p/python
+            p/typescript
+            p/react
+            p/fastapi
+          generateSarif: "1"
+
+      - name: Upload Semgrep SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: semgrep.sarif
+
+      - name: Upload Semgrep Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-analysis-report
+          path: semgrep.sarif
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Code Duplication & Complexity Metrics (Radon, Xenon, JSCPD)
+  # ---------------------------------------------------------------------------
+  code-metrics:
+    name: Code Duplication & Complexity Metrics
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Python complexity tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install radon xenon
+
+      - name: Create reports directory
+        run: mkdir -p reports/metrics reports/jscpd
+
+      - name: Analyze Python Cyclomatic Complexity (radon cc)
+        run: |
+          echo "=== Python Cyclomatic Complexity ==="
+          python -m radon cc backend/app -s -a | tee reports/metrics/cyclomatic_complexity.txt
+
+      - name: Analyze Python Maintainability Index (radon mi)
+        run: |
+          echo "=== Python Maintainability Index ==="
+          python -m radon mi backend/app -s | tee reports/metrics/maintainability_index.txt
+
+      - name: Run Python Complexity Threshold Check (xenon)
+        run: |
+          python -m xenon --max-absolute B --max-modules B --max-average A backend/app || true
+
+      - name: Run Code Duplication Scan (jscpd)
+        run: |
+          npx jscpd backend/app frontend/src --threshold 10 --reporters console,html,badge --output ./reports/jscpd --ignore "**/*.json,**/node_modules/**" || true
+
+      - name: Generate Code Metrics Step Summary
+        if: always()
+        run: |
+          echo "## 📊 Code Duplication & Complexity Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "### Python Cyclomatic Complexity (Radon)" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 25 reports/metrics/cyclomatic_complexity.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Python Maintainability Index" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat reports/metrics/maintainability_index.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Complexity & Duplication Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-metrics-and-duplication-report
+          path: reports/
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # Secret scanning
@@ -177,3 +306,4 @@ jobs:
         continue-on-error: true
         with:
           category: "/language:${{ matrix.language }}"
+
