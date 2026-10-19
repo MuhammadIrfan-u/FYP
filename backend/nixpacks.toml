@@ -1,0 +1,18 @@
+# Nixpacks build config for the backend service (rootDirectory: /backend).
+# The start command is intentionally not set here; it stays in the Railway service config.
+
+[phases.setup]
+# Safety net: system libraries so cv2 stays importable even if the full
+# opencv-python build is loaded. "..." keeps the default apt packages.
+aptPkgs = ["...", "libxcb1", "libgl1", "libglib2.0-0"]
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install -r requirements.txt",
+  # ultralytics pulls in the full opencv-python, which shares the cv2 package
+  # directory with opencv-python-headless and wins the import. Remove it.
+  ". /opt/venv/bin/activate && (pip uninstall -y opencv-python || true)",
+  # Uninstalling opencv-python deletes the shared cv2/ files, so restore the headless build.
+  ". /opt/venv/bin/activate && pip install --force-reinstall --no-deps opencv-python-headless",
+]
