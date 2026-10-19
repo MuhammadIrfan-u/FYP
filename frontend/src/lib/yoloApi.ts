@@ -5,6 +5,14 @@
 
 export const YOLO_API_BASE = process.env.NEXT_PUBLIC_YOLO_API_URL || 'http://127.0.0.1:8000';
 
+export function normalizeVideoUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  if (url.startsWith('/')) {
+    return `${YOLO_API_BASE}${url}`;
+  }
+  return url.replace(/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/, YOLO_API_BASE);
+}
+
 export interface YOLODetectionItem {
   id: string;
   class: string;
@@ -133,7 +141,11 @@ export async function uploadVideoToYOLO(file: File): Promise<YOLOVideoUploadResu
     throw new Error(`Video upload failed (${res.status}): ${errorText}`);
   }
 
-  return await res.json();
+  const data: YOLOVideoUploadResult = await res.json();
+  if (data.video_url) {
+    data.video_url = normalizeVideoUrl(data.relative_url || data.video_url);
+  }
+  return data;
 }
 
 export async function analyzeVideoWithYOLO(
@@ -164,7 +176,11 @@ export async function analyzeVideoWithYOLO(
     throw new Error(`Full video analysis failed (${res.status}): ${errorText}`);
   }
 
-  return await res.json();
+  const data: YOLOVideoAnalysisResult = await res.json();
+  if (data.video_url) {
+    data.video_url = normalizeVideoUrl(data.video_url);
+  }
+  return data;
 }
 
 export interface AnnotatedChunk {
@@ -248,7 +264,17 @@ export async function getBackgroundJobStatus(jobId: string): Promise<BackgroundA
     throw new Error(`Failed to get job status (${res.status}): ${errorText}`);
   }
 
-  return await res.json();
+  const job: BackgroundAnnotationJob = await res.json();
+  if (job.full_video_url) {
+    job.full_video_url = normalizeVideoUrl(job.full_relative_url || job.full_video_url);
+  }
+  if (job.chunks && Array.isArray(job.chunks)) {
+    job.chunks = job.chunks.map((chunk) => ({
+      ...chunk,
+      video_url: normalizeVideoUrl(chunk.relative_url || chunk.video_url),
+    }));
+  }
+  return job;
 }
 
 export async function listBackgroundJobs(): Promise<BackgroundAnnotationJob[]> {
@@ -262,7 +288,15 @@ export async function listBackgroundJobs(): Promise<BackgroundAnnotationJob[]> {
   }
 
   const data = await res.json();
-  return data.jobs || [];
+  const jobs: BackgroundAnnotationJob[] = data.jobs || [];
+  return jobs.map((job) => ({
+    ...job,
+    full_video_url: normalizeVideoUrl(job.full_relative_url || job.full_video_url),
+    chunks: (job.chunks || []).map((chunk) => ({
+      ...chunk,
+      video_url: normalizeVideoUrl(chunk.relative_url || chunk.video_url),
+    })),
+  }));
 }
 
 export interface SyncVideosPayload {
@@ -289,7 +323,14 @@ export async function syncTrainingVideos(payload: SyncVideosPayload) {
     throw new Error(`Video synchronization failed (${res.status}): ${errorText}`);
   }
 
-  return await res.json();
+  const data = await res.json();
+  if (data.video_a?.video_url) {
+    data.video_a.video_url = normalizeVideoUrl(data.video_a.video_url);
+  }
+  if (data.video_b?.video_url) {
+    data.video_b.video_url = normalizeVideoUrl(data.video_b.video_url);
+  }
+  return data;
 }
 
 export async function renderSyncedVideo(params: {
@@ -322,6 +363,10 @@ export async function renderSyncedVideo(params: {
     throw new Error(`Failed to render synchronized video (${res.status}): ${errorText}`);
   }
 
-  return await res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    synced_video_url: normalizeVideoUrl(data.relative_url || data.synced_video_url),
+  };
 }
 
