@@ -383,7 +383,7 @@ export const PLAYERS_DATA: PlayerStats[] = [
   {
     id: 'player-9',
     number: 9,
-    name: 'Gabriel Ramos',
+    name: 'Haider Shah',
     position: 'Striker',
     role: 'Center Forward (ST)',
     team: 'FC Dynamo',
@@ -880,7 +880,7 @@ export const REPORTS_DATA: ReportItem[] = [
 
 export const DEFAULT_SETTINGS: TeamProfileSettings = {
   teamName: 'FC Dynamo',
-  coachName: 'Alex Vance',
+  coachName: 'Irfan',
   coachLicense: 'UEFA / AFC Pro License',
   season: '2026 / 2027 Championship',
   formation: '4-3-3 Attacking',
