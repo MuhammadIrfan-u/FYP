@@ -135,8 +135,12 @@ export const AnalysisView: React.FC = () => {
         if (updated) {
           setActiveBackgroundJob(updated);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Background job poll exception:', err);
+        // If job was lost due to server restart, stop polling
+        if (err?.message?.includes('404')) {
+          setActiveBackgroundJob(null);
+        }
       }
     }, 1500);
 
