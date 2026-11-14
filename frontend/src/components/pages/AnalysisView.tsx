@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Cpu,
   Download,
@@ -14,17 +14,91 @@ import {
   Clock,
   Video,
   RotateCcw,
+  Users,
+  ShieldAlert,
+  ArrowRightLeft,
+  ArrowRight,
+  CircleDot,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
-import { DetectionBox } from '@/types/football';
+import {
+  DetectionBox,
+  PossessionCarrier,
+  PossessionEventItem,
+  PossessionState,
+  PossessionStatus,
+  PossessionSummary,
+  TeamClusterInfo,
+} from '@/types/football';
 import {
   analyzeVideoWithYOLO,
   checkYOLOStatus,
   getBackgroundJobStatus,
   YOLOTimeline,
 } from '@/lib/yoloApi';
+
+const BATCH_SAMPLE_FPS = 10.0;
+const MAX_LIVE_EVENTS = 150;
+
+/** Unified possession data shown in the Team Grouping & Ball Possession section. */
+interface PossessionView {
+  source: 'Live' | 'Batch' | '5s Chunked';
+  teams: TeamClusterInfo[];
+  teamsReady: boolean;
+  status: PossessionStatus;
+  carrier: PossessionCarrier | null;
+  currTeam: number | null;
+  currPlayerId: number | null;
+  totalLosses: number;
+  totalPasses: number;
+  events: PossessionEventItem[];
+}
+
+const EMPTY_TEAMS: TeamClusterInfo[] = [1, 2].map((id) => ({
+  team_id: id as 1 | 2,
+  label: `Team ${id}`,
+  color_hex: null,
+  color_name: null,
+  lab: null,
+  player_count: 0,
+  frames_held: 0,
+  possession_percent: 0,
+  losses: 0,
+  passes: 0,
+}));
+
+function formatEventTime(seconds: number | null): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '--:--';
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return `${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+function teamName(teamId: number | null): string {
+  if (teamId === 1 || teamId === 2) return `Team ${teamId}`;
+  if (teamId === 0) return 'Other';
+  return 'Unassigned';
+}
+
+function summaryToView(
+  summary: PossessionSummary,
+  source: PossessionView['source']
+): PossessionView {
+  return {
+    source,
+    teams: summary.teams?.length ? summary.teams : EMPTY_TEAMS,
+    teamsReady: summary.teams_ready,
+    status: summary.current_status,
+    carrier: summary.current_carrier,
+    currTeam: summary.current_carrier?.team_id ?? null,
+    currPlayerId: summary.current_carrier?.track_id ?? null,
+    totalLosses: summary.total_losses,
+    totalPasses: summary.total_passes,
+    events: summary.events || [],
+  };
+}
 
 export const AnalysisView: React.FC = () => {
   const {
@@ -73,6 +147,11 @@ export const AnalysisView: React.FC = () => {
     activeVideo.timeline as YOLOTimeline | undefined
   );
 
+  // Team grouping & ball possession
+  const [livePossession, setLivePossession] = useState<PossessionState | null>(null);
+  const [liveEvents, setLiveEvents] = useState<PossessionEventItem[]>([]);
+  const [batchPossession, setBatchPossession] = useState<PossessionSummary | null>(null);
+
   // Check YOLO backend connectivity
   useEffect(() => {
     let mounted = true;
@@ -98,6 +177,8 @@ export const AnalysisView: React.FC = () => {
     if (activeVideo.timeline) {
       setTimelineData(activeVideo.timeline as YOLOTimeline);
     }
+    // Batch possession belongs to the previous video's analysis.
+    setBatchPossession(null);
   }, [activeVideo]);
 
   // Callback when TacticalVideoPlayer detects a frame
@@ -105,7 +186,8 @@ export const AnalysisView: React.FC = () => {
     (
       detections: DetectionBox[],
       counts: Record<string, number>,
-      latencyMs: number
+      latencyMs: number,
+      possession?: PossessionState | null
     ) => {
       setLiveDetections(detections);
       setLiveClassCounts({
@@ -115,9 +197,54 @@ export const AnalysisView: React.FC = () => {
         'player with ball': counts['player with ball'] ?? 0,
       });
       if (latencyMs) setInferenceLatency(latencyMs);
+      if (possession) {
+        setLivePossession(possession);
+        const event = possession.event;
+        if (event) {
+          setLiveEvents((prev) =>
+            prev.some((e) => e.id === event.id)
+              ? prev
+              : [...prev, event].slice(-MAX_LIVE_EVENTS)
+          );
+        }
+      }
     },
     []
   );
+
+  const handlePossessionReset = useCallback(() => {
+    setLivePossession(null);
+    setLiveEvents([]);
+  }, []);
+
+  // One view model for Live, Batch (timeline) and 5s Chunked modes.
+  const possessionView: PossessionView | null = useMemo(() => {
+    if (analysisMode === 'chunked') {
+      const summary = activeBackgroundJob?.possession_summary;
+      return summary ? summaryToView(summary, '5s Chunked') : null;
+    }
+    const usingBatch = !!(batchPossession && timelineData);
+    if (livePossession) {
+      return {
+        source: usingBatch ? 'Batch' : 'Live',
+        teams: livePossession.teams?.length ? livePossession.teams : EMPTY_TEAMS,
+        teamsReady: livePossession.teams_ready,
+        status: livePossession.status,
+        carrier: livePossession.carrier,
+        currTeam: livePossession.curr_team,
+        currPlayerId: livePossession.curr_player_id,
+        totalLosses: livePossession.total_losses,
+        totalPasses: livePossession.total_passes,
+        events: usingBatch && batchPossession ? batchPossession.events : liveEvents,
+      };
+    }
+    return usingBatch && batchPossession ? summaryToView(batchPossession, 'Batch') : null;
+  }, [analysisMode, activeBackgroundJob, batchPossession, timelineData, livePossession, liveEvents]);
+
+  const lastPossessionEvent =
+    possessionView && possessionView.events.length > 0
+      ? possessionView.events[possessionView.events.length - 1]
+      : null;
 
   // Polling for background annotation job updates
   useEffect(() => {
@@ -197,9 +324,10 @@ export const AnalysisView: React.FC = () => {
 
     try {
       const filename = activeVideo.filename;
-      const res = await analyzeVideoWithYOLO(filename, 2.5, confidenceThreshold);
+      const res = await analyzeVideoWithYOLO(filename, BATCH_SAMPLE_FPS, confidenceThreshold, classConfidences);
       if (res && res.success) {
         setTimelineData(res.timeline);
+        setBatchPossession(res.possession_summary ?? null);
         setBatchProgressMsg(null);
         showToast(`Analyzed ${res.frames_analyzed} frames with model ${modelName}!`);
       }
@@ -222,6 +350,7 @@ export const AnalysisView: React.FC = () => {
       confidence_threshold: confidenceThreshold,
       active_counts: liveClassCounts,
       current_detections: liveDetections,
+      possession: possessionView,
       timeline: timelineData || null,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -388,6 +517,7 @@ export const AnalysisView: React.FC = () => {
                 modelName={modelName}
                 showTimeline={true}
                 onDetectionsUpdate={handleDetectionsUpdate}
+                onPossessionReset={handlePossessionReset}
                 onPlayStateChange={setIsPlaying}
               />
 
@@ -1024,7 +1154,229 @@ export const AnalysisView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. KEY MATCH & DETECTION METRICS */}
+      {/* 3. TEAM GROUPING & BALL POSSESSION */}
+      <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">
+        <div className="flex items-center gap-4">
+          <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
+            Team Grouping &amp; Ball Possession
+          </span>
+          <div className="flex-1 h-px bg-[#E8E3D8]" />
+          {possessionView && (
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#262626] text-white">
+              {possessionView.source}
+            </span>
+          )}
+        </div>
+
+        {!possessionView || !possessionView.teamsReady ? (
+          <div className="p-6 rounded-2xl bg-[#FAF8F4] border border-[#E8E3D8] text-center text-xs text-[#858585] space-y-1.5">
+            <Users className="w-6 h-6 mx-auto text-[#858585]" />
+            <p className="font-semibold text-[#404040]">
+              {possessionView ? 'Clustering jersey colours…' : 'No team data yet'}
+            </p>
+            <p>
+              {analysisMode === 'chunked'
+                ? 'Team grouping appears as soon as the first 5s chunk has been annotated.'
+                : 'Play the video or run “Analyze Full Video” — players are grouped into two teams by jersey colour and the ball carrier is tracked frame by frame.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Team cards + split bar + live status */}
+            <div className="lg:col-span-7 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {possessionView.teams.map((team) => {
+                  const holding = possessionView.currTeam === team.team_id;
+                  return (
+                    <div
+                      key={team.team_id}
+                      className={`bg-[#FAF8F4] border rounded-2xl p-4 shadow-2xs space-y-3 transition-colors ${
+                        holding ? 'border-[#F5B700] ring-1 ring-[#F5B700]/40' : 'border-[#E8E3D8]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="w-8 h-8 rounded-lg border-2 border-white shadow-xs shrink-0"
+                            style={{ backgroundColor: team.color_hex || '#D4D4D4' }}
+                            title={team.color_hex || undefined}
+                          />
+                          <div>
+                            <span className="text-sm font-black text-[#242424] block">{team.label}</span>
+                            <span className="text-[11px] text-[#858585]">
+                              {team.color_name || 'Unknown'} kit
+                              {team.color_hex && (
+                                <span className="font-mono ml-1">{team.color_hex}</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        {holding && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#F5B700]/15 text-[#A16207] border border-[#F5B700]/40 flex items-center gap-1">
+                            <CircleDot className="w-3 h-3" />
+                            On ball
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-xl bg-white border border-[#E8E3D8] py-2">
+                          <span className="block text-lg font-black text-[#242424]">
+                            {team.possession_percent.toFixed(1)}%
+                          </span>
+                          <span className="text-[10px] text-[#858585]">Possession</span>
+                        </div>
+                        <div className="rounded-xl bg-white border border-[#E8E3D8] py-2">
+                          <span className="block text-lg font-black text-[#242424]">{team.player_count}</span>
+                          <span className="text-[10px] text-[#858585]">Players in frame</span>
+                        </div>
+                        <div className="rounded-xl bg-white border border-[#E8E3D8] py-2">
+                          <span className="block text-lg font-black text-[#DC2626]">{team.losses}</span>
+                          <span className="text-[10px] text-[#858585]">Losses</span>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-[#858585] flex justify-between">
+                        <span>Same-team passes</span>
+                        <span className="font-mono font-bold text-[#16A34A]">{team.passes}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Possession split bar */}
+              <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-4 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-[#242424]">
+                  {possessionView.teams.map((t) => (
+                    <span key={t.team_id}>
+                      {t.label} {t.possession_percent.toFixed(1)}%
+                    </span>
+                  ))}
+                </div>
+                <div className="h-3 w-full rounded-full overflow-hidden flex bg-[#E8E3D8]">
+                  {possessionView.teams.map((t) => (
+                    <div
+                      key={t.team_id}
+                      className="h-full transition-all duration-500"
+                      style={{
+                        width: `${t.possession_percent}%`,
+                        backgroundColor: t.color_hex || '#A3A3A3',
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="text-[10px] text-[#858585]">
+                  Share of analysed frames in which each team&apos;s player was detected with the ball.
+                </p>
+              </div>
+
+              {/* Live status badge */}
+              {lastPossessionEvent ? (
+                <div
+                  className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                    lastPossessionEvent.status === 'lost'
+                      ? 'bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]'
+                      : 'bg-[#F0FDF4] border-[#BBF7D0] text-[#166534]'
+                  }`}
+                >
+                  {lastPossessionEvent.status === 'lost' ? (
+                    <ShieldAlert className="w-5 h-5 shrink-0 text-[#DC2626]" />
+                  ) : (
+                    <ArrowRightLeft className="w-5 h-5 shrink-0 text-[#16A34A]" />
+                  )}
+                  <div className="text-xs space-y-0.5">
+                    <span className="font-black text-sm block">
+                      {lastPossessionEvent.status === 'lost'
+                        ? 'Possession Lost — Ball Changed Team'
+                        : 'Possession Not Lost — Same Team Pass'}
+                    </span>
+                    <span className="font-mono">
+                      {formatEventTime(lastPossessionEvent.timestamp)} • {lastPossessionEvent.description}
+                    </span>
+                    <span className="block opacity-80">
+                      Current state:{' '}
+                      {possessionView.status === 'in_transit'
+                        ? `ball in transit (last carrier ${teamName(possessionView.currTeam)} #${possessionView.currPlayerId ?? '?'})`
+                        : possessionView.carrier
+                        ? `${possessionView.carrier.team_label} #${possessionView.carrier.track_id} holding`
+                        : 'no carrier'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl border bg-[#FAF8F4] border-[#E8E3D8] text-xs text-[#555555] flex items-center gap-2">
+                  <CircleDot className="w-4 h-4 text-[#F5B700]" />
+                  <span>
+                    {possessionView.carrier
+                      ? `${possessionView.carrier.team_label} #${possessionView.carrier.track_id} has the ball — no possession change yet.`
+                      : 'Waiting for the first ball carrier (class: player with ball).'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Possession transition log */}
+            <div className="lg:col-span-5 bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-4 shadow-2xs flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E8E3D8]">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#242424] flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Possession Transition Log
+                </h4>
+                <span className="text-[10px] font-mono text-[#858585]">
+                  {possessionView.totalLosses} lost • {possessionView.totalPasses} not lost
+                </span>
+              </div>
+              {possessionView.events.length === 0 ? (
+                <div className="py-8 text-center text-xs text-[#858585]">
+                  No possession transitions recorded yet.
+                </div>
+              ) : (
+                <div className="mt-2 max-h-80 overflow-y-auto divide-y divide-[#E8E3D8] text-xs">
+                  {possessionView.events.map((evt) => {
+                    const fromTeam = possessionView.teams.find((t) => t.team_id === evt.from_team);
+                    const toTeam = possessionView.teams.find((t) => t.team_id === evt.to_team);
+                    return (
+                      <div key={evt.id} className="py-2 flex items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-[#858585] w-14 shrink-0">
+                          {formatEventTime(evt.timestamp)}
+                        </span>
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0 font-semibold text-[#242424]">
+                          <span
+                            className="w-2.5 h-2.5 rounded-sm shrink-0"
+                            style={{ backgroundColor: fromTeam?.color_hex || '#A3A3A3' }}
+                          />
+                          <span className="truncate">
+                            {teamName(evt.from_team)} #{evt.from_player_id}
+                          </span>
+                          <ArrowRight className="w-3.5 h-3.5 text-[#858585] shrink-0" />
+                          <span
+                            className="w-2.5 h-2.5 rounded-sm shrink-0"
+                            style={{ backgroundColor: toTeam?.color_hex || '#A3A3A3' }}
+                          />
+                          <span className="truncate">
+                            {teamName(evt.to_team)} #{evt.to_player_id}
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                            evt.status === 'lost'
+                              ? 'bg-[#FEE2E2] text-[#B91C1C]'
+                              : 'bg-[#DCFCE7] text-[#15803D]'
+                          }`}
+                        >
+                          {evt.status === 'lost' ? 'Lost' : 'Not lost'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 4. KEY MATCH & DETECTION METRICS */}
       <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">
         <div className="flex items-center gap-4">
           <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
@@ -1074,11 +1426,26 @@ export const AnalysisView: React.FC = () => {
             <span className="text-xs text-[#858585] font-medium block">
               Possession Carrier
             </span>
-            <span className="text-2xl font-black mt-1 block text-[#059669]">
-              {liveClassCounts['player with ball'] > 0 ? 'Active' : 'Pass in Flight'}
+            <span
+              className="text-2xl font-black mt-1 flex items-center gap-2 text-[#059669]"
+              style={
+                possessionView?.carrier?.team_color_hex
+                  ? { color: possessionView.carrier.team_color_hex }
+                  : undefined
+              }
+            >
+              {possessionView?.carrier && possessionView.carrier.track_id != null
+                ? `${possessionView.carrier.team_label} #${possessionView.carrier.track_id}`
+                : possessionView?.status === 'in_transit'
+                ? 'Pass in Flight'
+                : liveClassCounts['player with ball'] > 0
+                ? 'Active'
+                : 'Searching'}
             </span>
             <span className="text-[11px] text-[#858585] mt-1 block">
-              Class: player with ball
+              {possessionView
+                ? `${possessionView.totalLosses} lost • ${possessionView.totalPasses} same-team passes (${possessionView.source})`
+                : 'Class: player with ball'}
             </span>
           </div>
         </div>

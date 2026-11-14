@@ -3,6 +3,13 @@
  * Connects to the local FastAPI YOLO service running at http://127.0.0.1:8000
  */
 
+import type {
+  DetectionBox,
+  DetectionClass,
+  PossessionState,
+  PossessionSummary,
+} from '@/types/football';
+
 export const YOLO_API_BASE = process.env.NEXT_PUBLIC_YOLO_API_URL || 'http://127.0.0.1:8000';
 
 export function normalizeVideoUrl(url: string | null | undefined): string {
@@ -22,6 +29,36 @@ export interface YOLODetectionItem {
   y: number; // percentage
   w: number; // percentage
   h: number; // percentage
+  // Team clustering & tracking (players only)
+  team_id?: number | null;
+  team_label?: string;
+  team_color_hex?: string | null;
+  team_color_name?: string | null;
+  jersey_color_hex?: string | null;
+  jersey_color_name?: string | null;
+  track_id?: number | null;
+  has_ball?: boolean;
+}
+
+/** Map an API detection (snake_case) to the UI DetectionBox (camelCase). */
+export function toDetectionBox(d: YOLODetectionItem): DetectionBox {
+  return {
+    id: d.id,
+    class: d.class as DetectionClass,
+    label: d.label,
+    confidence: d.confidence,
+    x: d.x,
+    y: d.y,
+    w: d.w,
+    h: d.h,
+    teamId: d.team_id ?? null,
+    teamLabel: d.team_label,
+    teamColorHex: d.team_color_hex ?? null,
+    teamColorName: d.team_color_name ?? null,
+    jerseyColorHex: d.jersey_color_hex ?? null,
+    trackId: d.track_id ?? null,
+    hasBall: d.has_ball ?? false,
+  };
 }
 
 export interface YOLOFrameAnalysisResult {
@@ -36,6 +73,8 @@ export interface YOLOFrameAnalysisResult {
   };
   total_detections: number;
   inference_time_ms: number;
+  session_id?: string | null;
+  possession?: PossessionState;
 }
 
 export interface YOLOVideoUploadResult {
@@ -54,6 +93,7 @@ export type YOLOTimeline = Record<string, {
   timestamp: number;
   detections: YOLODetectionItem[];
   counts: Record<string, number>;
+  possession?: PossessionState;
 }>;
 
 export interface YOLOVideoAnalysisResult {
@@ -66,6 +106,9 @@ export interface YOLOVideoAnalysisResult {
   timeline: YOLOTimeline;
   peak_class_counts: Record<string, number>;
   avg_class_counts: Record<string, number>;
+  sample_fps?: number;
+  frame_step?: number;
+  possession_summary?: PossessionSummary;
 }
 
 export async function checkYOLOStatus(): Promise<{
@@ -97,10 +140,20 @@ export async function checkYOLOStatus(): Promise<{
   }
 }
 
+export interface FrameSessionOptions {
+  /** Stable ID so the backend keeps team clusters, tracks and possession across frames. */
+  sessionId?: string;
+  /** Video time of the frame in seconds. */
+  timestamp?: number;
+  /** Clear the session's tracker before processing this frame. */
+  resetSession?: boolean;
+}
+
 export async function analyzeFrameWithYOLO(
   imageBase64: string,
   confidenceThreshold: number = 0.25,
-  classConfidences?: Record<string, number>
+  classConfidences?: Record<string, number>,
+  session?: FrameSessionOptions
 ): Promise<YOLOFrameAnalysisResult> {
   const bodyPayload: Record<string, unknown> = {
     image: imageBase64,
@@ -108,6 +161,13 @@ export async function analyzeFrameWithYOLO(
   };
   if (classConfidences) {
     bodyPayload.class_confidences = classConfidences;
+  }
+  if (session?.sessionId) {
+    bodyPayload.session_id = session.sessionId;
+    bodyPayload.reset_session = session.resetSession ?? false;
+  }
+  if (session?.timestamp !== undefined && Number.isFinite(session.timestamp)) {
+    bodyPayload.timestamp = session.timestamp;
   }
 
   const res = await fetch(`${YOLO_API_BASE}/api/analyze-frame`, {
@@ -125,6 +185,18 @@ export async function analyzeFrameWithYOLO(
   }
 
   return await res.json();
+}
+
+export async function resetPossessionSession(sessionId: string): Promise<void> {
+  try {
+    await fetch(`${YOLO_API_BASE}/api/possession/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch {
+    // Non-critical: the next frame can also request reset_session.
+  }
 }
 
 export async function uploadVideoToYOLO(file: File): Promise<YOLOVideoUploadResult> {
@@ -150,7 +222,7 @@ export async function uploadVideoToYOLO(file: File): Promise<YOLOVideoUploadResu
 
 export async function analyzeVideoWithYOLO(
   fileOrFilename: File | string,
-  sampleFps: number = 2.0,
+  sampleFps: number = 10.0,
   confidenceThreshold: number = 0.25,
   classConfidences?: Record<string, number>
 ): Promise<YOLOVideoAnalysisResult> {
@@ -193,6 +265,12 @@ export interface AnnotatedChunk {
   counts: Record<string, number>;
   detections_count: number;
   frames: number;
+  possession?: {
+    possession_percent: { team_1: number; team_2: number };
+    total_losses: number;
+    total_passes: number;
+    events: PossessionSummary['events'];
+  };
 }
 
 export interface BackgroundAnnotationJob {
@@ -206,6 +284,9 @@ export interface BackgroundAnnotationJob {
   chunk_duration_sec: number;
   confidence_threshold: number;
   class_confidences: Record<string, number>;
+  infer_fps?: number;
+  infer_interval_frames?: number | null;
+  possession_summary?: PossessionSummary | null;
   chunks: AnnotatedChunk[];
   full_video_url: string | null;
   full_relative_url: string | null;
@@ -220,12 +301,15 @@ export async function startBackgroundAnnotation(options: {
   confidenceThreshold?: number;
   classConfidences?: Record<string, number>;
   burnBoxes?: boolean;
+  /** Inference rate for chunk rendering (15 fps = 2-frame stride on 30 fps video). */
+  inferFps?: number;
 }): Promise<{
   success: boolean;
   job_id: string;
   status: string;
   chunk_duration: number;
   class_confidences: Record<string, number>;
+  infer_fps?: number;
   message: string;
 }> {
   const formData = new FormData();
@@ -235,6 +319,7 @@ export async function startBackgroundAnnotation(options: {
   formData.append('chunk_duration', (options.chunkDuration ?? 5.0).toString());
   formData.append('confidence_threshold', (options.confidenceThreshold ?? 0.25).toString());
   formData.append('burn_boxes', (options.burnBoxes ?? true).toString());
+  formData.append('infer_fps', (options.inferFps ?? 15.0).toString());
 
   if (options.classConfidences) {
     formData.append('class_confidences', JSON.stringify(options.classConfidences));

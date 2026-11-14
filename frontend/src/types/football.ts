@@ -31,6 +31,98 @@ export interface DetectionBox {
   team?: 'Blue' | 'Red' | 'Ref';
   speed?: string;
   trail?: Array<[number, number]>;
+  /** 1 or 2 for the clustered teams, 0 for an outlier (GK/referee), null if unknown. */
+  teamId?: number | null;
+  teamLabel?: string;
+  teamColorHex?: string | null;
+  teamColorName?: string | null;
+  jerseyColorHex?: string | null;
+  /** Persistent tracker ID (#1, #2, ...) across frames. */
+  trackId?: number | null;
+  hasBall?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Team clustering & ball possession (backend: app/services/team_possession.py)
+// ---------------------------------------------------------------------------
+
+export type PossessionStatus = 'idle' | 'holding' | 'not_lost' | 'lost' | 'in_transit';
+
+export interface TeamClusterInfo {
+  team_id: 1 | 2;
+  label: string;
+  color_hex: string | null;
+  color_name: string | null;
+  lab: number[] | null;
+  player_count: number;
+  frames_held: number;
+  possession_percent: number;
+  losses: number;
+  passes: number;
+}
+
+export interface PossessionCarrier {
+  track_id: number | null;
+  team_id: number | null;
+  team_label: string;
+  team_color_hex: string | null;
+  detection_id?: string | null;
+  confidence?: number | null;
+}
+
+export interface PossessionEventItem {
+  id: string;
+  frame_index: number;
+  timestamp: number | null;
+  status: 'lost' | 'not_lost';
+  possession_lost: boolean;
+  from_player_id: number | null;
+  from_team: number | null;
+  to_player_id: number | null;
+  to_team: number | null;
+  description: string;
+}
+
+export interface PossessionPercent {
+  team_1: number;
+  team_2: number;
+}
+
+/** Per-frame possession state returned with each analyzed frame. */
+export interface PossessionState {
+  frame_index: number;
+  timestamp: number | null;
+  status: PossessionStatus;
+  possession_status: PossessionStatus;
+  possession_lost: boolean;
+  carrier: PossessionCarrier | null;
+  prev_player_id: number | null;
+  prev_team: number | null;
+  curr_player_id: number | null;
+  curr_team: number | null;
+  event: PossessionEventItem | null;
+  teams: TeamClusterInfo[];
+  possession_percent: PossessionPercent;
+  total_losses: number;
+  total_passes: number;
+  teams_ready: boolean;
+}
+
+/** Cumulative possession for a whole clip / session / background job. */
+export interface PossessionSummary {
+  teams: TeamClusterInfo[];
+  possession_percent: PossessionPercent;
+  total_losses: number;
+  total_passes: number;
+  losses: Record<string, number>;
+  passes: Record<string, number>;
+  events: PossessionEventItem[];
+  frames_processed: number;
+  frames_with_carrier: number;
+  current_status: PossessionStatus;
+  current_carrier: PossessionCarrier | null;
+  teams_ready: boolean;
+  active_tracks: number;
 }
 
 export type VideoStatus = 'Uploading' | 'Processing' | 'Analysing' | 'Completed' | 'Failed' | 'Uploaded';

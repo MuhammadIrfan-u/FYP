@@ -11,9 +11,27 @@ import {
   Crosshair,
   Zap,
   AlertCircle,
+  ShieldAlert,
+  ArrowRightLeft,
 } from 'lucide-react';
-import { DetectionBox, DetectionClass } from '@/types/football';
-import { analyzeFrameWithYOLO, YOLOTimeline } from '@/lib/yoloApi';
+import { DetectionBox, PossessionEventItem, PossessionState } from '@/types/football';
+import {
+  analyzeFrameWithYOLO,
+  resetPossessionSession,
+  toDetectionBox,
+  YOLOTimeline,
+} from '@/lib/yoloApi';
+
+const LIVE_POLL_INTERVAL_MS = 100;
+const BANNER_DURATION_MS = 2200;
+const CARRIER_GOLD = '#F5B700';
+
+function createSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `live-${crypto.randomUUID()}`;
+  }
+  return `live-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 interface TacticalVideoPlayerProps {
   imageSrc?: string;
@@ -29,8 +47,11 @@ interface TacticalVideoPlayerProps {
   onDetectionsUpdate?: (
     detections: DetectionBox[],
     counts: Record<string, number>,
-    latencyMs: number
+    latencyMs: number,
+    possession?: PossessionState | null
   ) => void;
+  /** Called when the live tracking session restarts (new video or restart from 00:00). */
+  onPossessionReset?: () => void;
   onPlayStateChange?: (isPlaying: boolean) => void;
 }
 
@@ -44,12 +65,22 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   timeline,
   modelName = 'best_5.onnx',
   onDetectionsUpdate,
+  onPossessionReset,
   onPlayStateChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inFlightRef = useRef<boolean>(false);
+
+  // Live possession session: ID created lazily inside callbacks (never during render).
+  const sessionIdRef = useRef<string>('');
+  const resetPendingRef = useRef<boolean>(true);
+  const lastBannerEventIdRef = useRef<string | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [possession, setPossession] = useState<PossessionState | null>(null);
+  const [bannerEvent, setBannerEvent] = useState<PossessionEventItem | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
@@ -70,8 +101,49 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const [lastLatencyMs, setLastLatencyMs] = useState<number>(38);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
 
+  const getSessionId = useCallback(() => {
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = createSessionId();
+    }
+    return sessionIdRef.current;
+  }, []);
+
+  // Show the Possession Lost / Not Lost popup once per backend event.
+  const showPossessionBanner = useCallback((event: PossessionEventItem | null | undefined) => {
+    if (!event || event.id === lastBannerEventIdRef.current) return;
+    lastBannerEventIdRef.current = event.id;
+    setBannerEvent(event);
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    bannerTimerRef.current = setTimeout(() => setBannerEvent(null), BANNER_DURATION_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
+  }, []);
+
+  // Keep the latest reset callback without making the reset effect depend on it.
+  const onPossessionResetRef = useRef(onPossessionReset);
+  useEffect(() => {
+    onPossessionResetRef.current = onPossessionReset;
+  }, [onPossessionReset]);
+
+  // Restart team clustering / tracking / possession counters on the backend.
+  const restartPossessionSession = useCallback(() => {
+    resetPendingRef.current = true;
+    lastBannerEventIdRef.current = null;
+    setPossession(null);
+    setBannerEvent(null);
+    if (sessionIdRef.current) {
+      void resetPossessionSession(sessionIdRef.current);
+    }
+    onPossessionResetRef.current?.();
+  }, []);
+
   // Reset when videoUrl changes
   useEffect(() => {
+    restartPossessionSession();
     setVideoHasError(false);
     setCurrentBoxes([]);
     setLoadedDuration(null);
@@ -82,7 +154,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         videoRef.current.currentTime = 0;
       }
     }
-  }, [videoUrl]);
+  }, [videoUrl, restartPossessionSession]);
 
   // Filter boxes by confidence threshold (incorporating per-class confidence if provided)
   const visibleBoxes: DetectionBox[] = currentBoxes.filter((box) => {
@@ -150,27 +222,30 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
       if (!dataUrl) return;
 
-      const res = await analyzeFrameWithYOLO(dataUrl, confidenceThreshold, classConfidences);
+      const resetSession = resetPendingRef.current;
+      resetPendingRef.current = false;
+      const frameTime =
+        videoRef.current && !videoHasError ? videoRef.current.currentTime : undefined;
+
+      const res = await analyzeFrameWithYOLO(dataUrl, confidenceThreshold, classConfidences, {
+        sessionId: getSessionId(),
+        timestamp: frameTime,
+        resetSession,
+      });
 
       if (res && res.success) {
         setInferenceError(null);
         setLastLatencyMs(res.inference_time_ms || 40);
 
-        const mappedBoxes: DetectionBox[] = res.detections.map((d) => ({
-          id: d.id,
-          class: d.class as DetectionClass,
-          label: d.label,
-          confidence: d.confidence,
-          x: d.x,
-          y: d.y,
-          w: d.w,
-          h: d.h,
-        }));
+        const mappedBoxes: DetectionBox[] = res.detections.map(toDetectionBox);
+        const framePossession = res.possession ?? null;
 
         setCurrentBoxes(mappedBoxes);
+        setPossession(framePossession);
+        showPossessionBanner(framePossession?.event);
 
         if (onDetectionsUpdate) {
-          onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms);
+          onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms, framePossession);
         }
       }
     } catch (err: unknown) {
@@ -182,7 +257,15 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     } finally {
       inFlightRef.current = false;
     }
-  }, [confidenceThreshold, onDetectionsUpdate, videoHasError, imageSrc]);
+  }, [
+    confidenceThreshold,
+    classConfidences,
+    onDetectionsUpdate,
+    videoHasError,
+    imageSrc,
+    getSessionId,
+    showPossessionBanner,
+  ]);
 
   // Synchronize timeline detections if available
   const syncTimelineDetections = useCallback((timeSec: number) => {
@@ -206,25 +289,19 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     if (minDiff <= 1.0) {
       const entry = timeline[closest.toFixed(2)] || timeline[closest.toString()];
       if (entry && entry.detections) {
-        const mapped: DetectionBox[] = entry.detections.map((d) => ({
-          id: d.id,
-          class: d.class as DetectionClass,
-          label: d.label,
-          confidence: d.confidence,
-          x: d.x,
-          y: d.y,
-          w: d.w,
-          h: d.h,
-        }));
+        const mapped: DetectionBox[] = entry.detections.map(toDetectionBox);
+        const entryPossession = entry.possession ?? null;
         setCurrentBoxes(mapped);
+        setPossession(entryPossession);
+        showPossessionBanner(entryPossession?.event);
         if (onDetectionsUpdate) {
-          onDetectionsUpdate(mapped, entry.counts, lastLatencyMs);
+          onDetectionsUpdate(mapped, entry.counts, lastLatencyMs, entryPossession);
         }
         return true;
       }
     }
     return false;
-  }, [timeline, onDetectionsUpdate, lastLatencyMs]);
+  }, [timeline, onDetectionsUpdate, lastLatencyMs, showPossessionBanner]);
 
   // Playback timer simulation when video element has error or fallback image is used
   useEffect(() => {
@@ -246,14 +323,14 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       // Run once immediately upon playing
       runFrameInference();
 
-      // Sample every 250ms for responsive realtime tracking without overlapping in-flight requests
+      // Poll every 100ms for smooth live tracking; the in-flight guard prevents overlapping requests
       intervalId = setInterval(() => {
         // If timeline didn't provide synchronized frame, run live frame inference
         const synchronized = syncTimelineDetections(currentTimeSec);
         if (!synchronized && !inFlightRef.current) {
           runFrameInference();
         }
-      }, 250);
+      }, LIVE_POLL_INTERVAL_MS);
     }
 
     return () => {
@@ -294,6 +371,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   };
 
   const handleSeek = (seconds: number) => {
+    // Restarting from the beginning starts a fresh possession count.
+    if (seconds === 0) restartPossessionSession();
     setCurrentTimeSec(seconds);
     if (videoUrl && videoRef.current && !videoHasError) {
       videoRef.current.currentTime = seconds;
@@ -495,23 +574,70 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           <div className="absolute inset-0 pointer-events-none">
             {visibleBoxes.map((box) => {
               const style = getBoxStyle(box);
+              const teamHex = box.teamColorHex || null;
+              const isCarrier = !!box.hasBall;
+              const teamTag =
+                box.teamId === 1 || box.teamId === 2
+                  ? `T${box.teamId}`
+                  : box.teamId === 0
+                  ? 'OTH'
+                  : null;
+              const boxName =
+                teamTag && box.trackId != null
+                  ? `${teamTag} #${box.trackId}${isCarrier ? ' • Ball' : ''}`
+                  : style.name;
               return (
                 <div
                   key={box.id}
-                  className={`absolute border-2 ${style.border} ${style.bg} transition-all duration-150`}
+                  className={`absolute border-2 ${
+                    teamHex ? '' : `${style.border} ${style.bg}`
+                  } transition-all duration-150`}
                   style={{
                     left: `${box.x}%`,
                     top: `${box.y}%`,
                     width: `${box.w}%`,
                     height: `${box.h}%`,
+                    ...(teamHex
+                      ? { borderColor: teamHex, backgroundColor: `${teamHex}26` }
+                      : {}),
+                    ...(isCarrier
+                      ? {
+                          // Gold carrier highlight
+                          boxShadow: `0 0 0 2px ${CARRIER_GOLD}, 0 0 14px ${CARRIER_GOLD}aa`,
+                        }
+                      : {}),
                   }}
                 >
+                  {/* Gold ground ring under the ball carrier's feet */}
+                  {isCarrier && (
+                    <span
+                      className="absolute left-1/2 -translate-x-1/2 rounded-[50%] border-2 animate-pulse"
+                      style={{
+                        bottom: '-6px',
+                        width: '140%',
+                        height: '12px',
+                        borderColor: CARRIER_GOLD,
+                      }}
+                    />
+                  )}
+
                   {/* Class Label & Confidence Score Badge */}
                   {showLabels && (
                     <div
-                      className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-mono font-bold uppercase tracking-tight flex items-center gap-1 shadow-xs whitespace-nowrap ${style.badge}`}
+                      className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-mono font-bold uppercase tracking-tight flex items-center gap-1 shadow-xs whitespace-nowrap ${
+                        teamHex ? 'text-white' : style.badge
+                      }`}
+                      style={
+                        teamHex
+                          ? {
+                              backgroundColor: teamHex,
+                              outline: isCarrier ? `2px solid ${CARRIER_GOLD}` : undefined,
+                              textShadow: '0 1px 1px rgba(0,0,0,0.6)',
+                            }
+                          : undefined
+                      }
                     >
-                      <span>{style.name}</span>
+                      <span>{boxName}</span>
                       {box.confidence !== undefined && (
                         <span className="opacity-90 font-semibold">
                           {(box.confidence * 100).toFixed(0)}%
@@ -547,9 +673,83 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           </span>
         </div>
 
+        {/* Team 1 vs Team 2 possession HUD badge */}
+        {possession && possession.teams_ready && (
+          <div className="absolute top-3 left-3 bg-[#171717]/80 backdrop-blur-md border border-white/10 rounded-xl px-2.5 py-1.5 text-[10px] sm:text-[11px] text-white flex flex-col gap-1 pointer-events-none shadow-md min-w-[150px]">
+            {possession.teams.map((t) => {
+              const isHolding = possession.curr_team === t.team_id;
+              return (
+                <div key={t.team_id} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-sm border border-white/60"
+                      style={{ backgroundColor: t.color_hex || '#999999' }}
+                    />
+                    <span className={`font-bold ${isHolding ? 'text-[#F5B700]' : ''}`}>
+                      {t.label}
+                    </span>
+                    <span className="text-white/60">{t.color_name}</span>
+                  </div>
+                  <span className="font-mono font-bold">{t.possession_percent.toFixed(0)}%</span>
+                </div>
+              );
+            })}
+            <div className="h-1 w-full rounded-full overflow-hidden flex bg-white/20">
+              {possession.teams.map((t) => (
+                <div
+                  key={t.team_id}
+                  style={{
+                    width: `${t.possession_percent}%`,
+                    backgroundColor: t.color_hex || '#999999',
+                  }}
+                />
+              ))}
+            </div>
+            <span className="text-[9px] font-mono text-white/70 uppercase tracking-wide">
+              {possession.carrier
+                ? `Ball: ${possession.carrier.team_label} #${possession.carrier.track_id}`
+                : possession.status === 'in_transit'
+                ? 'Ball in transit'
+                : 'No carrier'}
+            </span>
+          </div>
+        )}
+
+        {/* Possession Lost / Not Lost popup banner */}
+        {bannerEvent && (
+          <div
+            key={bannerEvent.id}
+            className="absolute top-[18%] left-1/2 -translate-x-1/2 pointer-events-none z-10 animate-in fade-in zoom-in-90 slide-in-from-top-4 duration-300"
+          >
+            <div
+              className={`px-4 sm:px-6 py-2.5 rounded-2xl border-2 shadow-xl text-white text-center ${
+                bannerEvent.status === 'lost'
+                  ? 'bg-[#DC2626]/90 border-[#FCA5A5]'
+                  : 'bg-[#16A34A]/90 border-[#86EFAC]'
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2 text-sm sm:text-lg font-black tracking-wide uppercase">
+                {bannerEvent.status === 'lost' ? (
+                  <ShieldAlert className="w-5 h-5 animate-pulse" />
+                ) : (
+                  <ArrowRightLeft className="w-5 h-5" />
+                )}
+                <span>
+                  {bannerEvent.status === 'lost'
+                    ? 'Possession Lost!'
+                    : 'Possession Not Lost (Same Team)'}
+                </span>
+              </div>
+              <div className="text-[10px] sm:text-xs font-mono opacity-90 mt-0.5">
+                {bannerEvent.description}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Inference notice if error */}
         {inferenceError && (
-          <div className="absolute top-3 left-3 bg-[#FEF2F2]/90 border border-[#FECACA] rounded-lg px-2.5 py-1 text-[11px] text-[#991B1B] flex items-center gap-1.5">
+          <div className="absolute top-3 right-3 bg-[#FEF2F2]/90 border border-[#FECACA] rounded-lg px-2.5 py-1 text-[11px] text-[#991B1B] flex items-center gap-1.5">
             <AlertCircle className="w-3.5 h-3.5 text-[#DC2626]" />
             <span>Inference notice: check backend connection</span>
           </div>

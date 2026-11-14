@@ -16,6 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+from app.services.team_possession import (
+    TeamPossessionTracker,
+    get_or_create_session_tracker,
+    reset_session_tracker,
+)
 from app.services.video_annotator import (
     create_annotation_job,
     get_job_status,
@@ -88,6 +93,30 @@ class FrameAnalysisRequest(BaseModel):
     image: str  # Base64 data URL or raw base64
     confidence_threshold: float | None = 0.25
     class_confidences: dict[str, float] | None = None
+    session_id: str | None = None
+    timestamp: float | None = None
+    reset_session: bool | None = False
+
+
+class PossessionResetRequest(BaseModel):
+    session_id: str
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _parse_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_detections(
@@ -199,6 +228,9 @@ async def analyze_frame(raw_request: Request):
     img_bgr = None
     confidence_threshold = 0.25
     class_confidences = None
+    session_id: str | None = None
+    frame_timestamp: float | None = None
+    reset_session = False
 
     content_type = raw_request.headers.get("content-type", "").lower()
 
@@ -210,6 +242,9 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            session_id = body.get("session_id") or None
+            frame_timestamp = _parse_optional_float(body.get("timestamp"))
+            reset_session = _parse_bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -228,6 +263,9 @@ async def analyze_frame(raw_request: Request):
             conf_field = form.get("confidence_threshold")
             if conf_field:
                 confidence_threshold = float(conf_field)
+            session_id = form.get("session_id") or None
+            frame_timestamp = _parse_optional_float(form.get("timestamp"))
+            reset_session = _parse_bool(form.get("reset_session"))
             cls_conf_field = form.get("class_confidences")
             if cls_conf_field:
                 try:
@@ -257,6 +295,9 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            session_id = body.get("session_id") or None
+            frame_timestamp = _parse_optional_float(body.get("timestamp"))
+            reset_session = _parse_bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -290,6 +331,16 @@ async def analyze_frame(raw_request: Request):
         conf_threshold=confidence_threshold,
         class_confidences=class_confidences,
     )
+
+    # Team clustering + possession. Without a session_id, a throwaway tracker still
+    # labels teams for this single frame.
+    if session_id:
+        tracker = get_or_create_session_tracker(str(session_id), reset=reset_session)
+    else:
+        tracker = TeamPossessionTracker()
+    possession = tracker.process_frame(
+        img_bgr, parsed["detections"], timestamp=frame_timestamp
+    )
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
     return {
@@ -298,7 +349,19 @@ async def analyze_frame(raw_request: Request):
         "class_counts": parsed["class_counts"],
         "total_detections": len(parsed["detections"]),
         "inference_time_ms": elapsed_ms,
+        "session_id": session_id,
+        "possession": possession,
     }
+
+
+@app.post("/api/possession/reset")
+def reset_possession_session(req: PossessionResetRequest):
+    """Clear team clusters, tracks and possession counters for a live session."""
+    existed = reset_session_tracker(req.session_id)
+    if not existed:
+        # Create a fresh tracker so the next frame starts clean either way.
+        get_or_create_session_tracker(req.session_id, reset=True)
+    return {"success": True, "session_id": req.session_id, "existed": existed}
 
 
 @app.post("/api/upload")
@@ -341,11 +404,15 @@ def upload_video(file: UploadFile = File(...)):  # noqa: B008
 def analyze_video(
     file: UploadFile | None = File(None),  # noqa: B008
     video_filename: str | None = Form(None),
-    sample_fps: float = Form(2.0),
+    sample_fps: float = Form(10.0),
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
 ):
-    """Analyze a football video file by sampling frames at specified rate with optional per-class confidence thresholds"""
+    """Analyze a football video by sampling frames (default 10 fps) with per-class thresholds.
+
+    Each timeline entry carries the per-frame team/possession state, and the response
+    includes an overall ``possession_summary``.
+    """
     if not MODEL_LOADED or model is None:
         raise HTTPException(status_code=500, detail="YOLO model is not initialized.")
 
@@ -387,8 +454,10 @@ def analyze_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration_sec = total_frames / video_fps if video_fps > 0 else 0.0
 
-    # Calculate step in frames
+    # Calculate step in frames (dense sampling so passes/turnovers are not skipped)
+    sample_fps = max(0.1, float(sample_fps or 10.0))
     step_frames = max(1, round(video_fps / sample_fps))
+    possession_tracker = TeamPossessionTracker()
 
     timeline = {}
     aggregated_counts = {
@@ -425,10 +494,15 @@ def analyze_video(
                 class_confidences=parsed_class_confidences,
             )
 
+            frame_possession = possession_tracker.process_frame(
+                frame, parsed["detections"], timestamp=timestamp
+            )
+
             timeline[f"{timestamp:.2f}"] = {
                 "timestamp": timestamp,
                 "detections": parsed["detections"],
                 "counts": parsed["class_counts"],
+                "possession": frame_possession,
             }
 
             for k, v in parsed["class_counts"].items():
@@ -457,6 +531,9 @@ def analyze_video(
         "timeline": timeline,
         "peak_class_counts": max_counts,
         "avg_class_counts": avg_counts,
+        "sample_fps": sample_fps,
+        "frame_step": step_frames,
+        "possession_summary": possession_tracker.get_summary(),
     }
 
 
@@ -469,6 +546,7 @@ def start_background_annotation(
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
     burn_boxes: bool = Form(True),
+    infer_fps: float = Form(15.0),
 ):
     """
     Launches a background video inference and annotation job that segments big videos
@@ -606,6 +684,7 @@ def start_background_annotation(
         burn_boxes=burn_boxes,
         parse_detections_fn=parse_detections,
         model_obj=model,
+        infer_fps=infer_fps,
     )
 
     return {
@@ -614,6 +693,7 @@ def start_background_annotation(
         "status": job["status"],
         "chunk_duration": chunk_duration,
         "class_confidences": job["class_confidences"],
+        "infer_fps": job["infer_fps"],
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }
 

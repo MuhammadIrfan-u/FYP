@@ -590,6 +590,7 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         confidenceThreshold: confidenceThreshold,
         classConfidences: effectiveConfs,
         burnBoxes: true,
+        inferFps: 15.0,
       });
 
       if (res && res.success) {
