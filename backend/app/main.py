@@ -16,6 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+from app.services.team_possession import (
+    TeamPossessionTracker,
+    get_or_create_session_tracker,
+)
 from app.services.video_annotator import (
     create_annotation_job,
     get_job_status,
@@ -199,6 +203,9 @@ async def analyze_frame(raw_request: Request):
     img_bgr = None
     confidence_threshold = 0.25
     class_confidences = None
+    session_id: str | None = None
+    frame_timestamp: float = 0.0
+    reset_session: bool = False
 
     content_type = raw_request.headers.get("content-type", "").lower()
 
@@ -210,6 +217,12 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            if body.get("session_id"):
+                session_id = str(body.get("session_id"))
+            if body.get("timestamp") is not None:
+                frame_timestamp = float(body.get("timestamp"))
+            if body.get("reset_session") is not None:
+                reset_session = bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -238,6 +251,15 @@ async def analyze_frame(raw_request: Request):
                     )
                 except (json.JSONDecodeError, ValueError, TypeError):
                     class_confidences = None
+            sess_field = form.get("session_id")
+            if sess_field:
+                session_id = str(sess_field)
+            ts_field = form.get("timestamp")
+            if ts_field:
+                frame_timestamp = float(ts_field)
+            reset_field = form.get("reset_session")
+            if reset_field is not None:
+                reset_session = str(reset_field).lower() in ("1", "true", "yes")
 
             if file_field and hasattr(file_field, "read"):
                 contents = await file_field.read()
@@ -257,6 +279,12 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            if body.get("session_id"):
+                session_id = str(body.get("session_id"))
+            if body.get("timestamp") is not None:
+                frame_timestamp = float(body.get("timestamp"))
+            if body.get("reset_session") is not None:
+                reset_session = bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -290,6 +318,12 @@ async def analyze_frame(raw_request: Request):
         conf_threshold=confidence_threshold,
         class_confidences=class_confidences,
     )
+
+    tracker = get_or_create_session_tracker(session_id, reset=reset_session)
+    possession = tracker.process_frame(
+        img_bgr, parsed["detections"], timestamp=frame_timestamp
+    )
+
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
     return {
@@ -298,7 +332,15 @@ async def analyze_frame(raw_request: Request):
         "class_counts": parsed["class_counts"],
         "total_detections": len(parsed["detections"]),
         "inference_time_ms": elapsed_ms,
+        "possession": possession,
     }
+
+
+@app.post("/api/possession/reset")
+async def reset_possession_session(session_id: str):
+    """Reset the stateful team-grouping and ball-possession tracker for a session."""
+    get_or_create_session_tracker(session_id, reset=True)
+    return {"success": True, "session_id": session_id}
 
 
 @app.post("/api/upload")
@@ -341,7 +383,7 @@ def upload_video(file: UploadFile = File(...)):  # noqa: B008
 def analyze_video(
     file: UploadFile | None = File(None),  # noqa: B008
     video_filename: str | None = Form(None),
-    sample_fps: float = Form(2.0),
+    sample_fps: float = Form(10.0),
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
 ):
@@ -411,6 +453,8 @@ def analyze_video(
         except (ValueError, TypeError):
             min_conf = confidence_threshold
 
+    tracker = TeamPossessionTracker()
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -424,11 +468,15 @@ def analyze_video(
                 conf_threshold=confidence_threshold,
                 class_confidences=parsed_class_confidences,
             )
+            possession = tracker.process_frame(
+                frame, parsed["detections"], timestamp=timestamp
+            )
 
             timeline[f"{timestamp:.2f}"] = {
                 "timestamp": timestamp,
                 "detections": parsed["detections"],
                 "counts": parsed["class_counts"],
+                "possession": possession,
             }
 
             for k, v in parsed["class_counts"].items():
@@ -457,6 +505,7 @@ def analyze_video(
         "timeline": timeline,
         "peak_class_counts": max_counts,
         "avg_class_counts": avg_counts,
+        "possession_summary": tracker.get_summary(),
     }
 
 
@@ -469,6 +518,7 @@ def start_background_annotation(
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
     burn_boxes: bool = Form(True),
+    infer_fps: float = Form(15.0),
 ):
     """
     Launches a background video inference and annotation job that segments big videos
@@ -606,6 +656,7 @@ def start_background_annotation(
         burn_boxes=burn_boxes,
         parse_detections_fn=parse_detections,
         model_obj=model,
+        infer_fps=infer_fps,
     )
 
     return {
@@ -613,6 +664,7 @@ def start_background_annotation(
         "job_id": job["job_id"],
         "status": job["status"],
         "chunk_duration": chunk_duration,
+        "infer_fps": job["infer_fps"],
         "class_confidences": job["class_confidences"],
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }

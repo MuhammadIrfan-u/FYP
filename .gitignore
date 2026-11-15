@@ -31,6 +31,7 @@ build/
 dist/
 
 # Uploads & temporary generated media
+/*.mp4
 backend/uploads/jobs/
 backend/uploads/sync_sessions/
 backend/uploads/*.mp4

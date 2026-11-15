@@ -28,7 +28,14 @@ export interface DetectionBox {
   w: number; // percentage width
   h: number; // percentage height
   jerseyNumber?: number;
-  team?: 'Blue' | 'Red' | 'Ref';
+  team?: 'Blue' | 'Red' | 'Ref' | string;
+  teamId?: number;
+  teamLabel?: string;
+  teamColorHex?: string;
+  teamColorName?: string;
+  jerseyColorHex?: string;
+  trackId?: number;
+  hasBall?: boolean;
   speed?: string;
   trail?: Array<[number, number]>;
 }

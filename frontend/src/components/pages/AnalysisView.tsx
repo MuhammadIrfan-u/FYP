@@ -8,12 +8,13 @@ import {
   Play,
   Film,
   Layers,
-  Sparkles,
   CheckCircle2,
-  ChevronRight,
   Clock,
   Video,
   RotateCcw,
+  Users,
+  ArrowLeftRight,
+  AlertTriangle,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
@@ -23,6 +24,9 @@ import {
   analyzeVideoWithYOLO,
   checkYOLOStatus,
   getBackgroundJobStatus,
+  PossessionEventItem,
+  PossessionState,
+  PossessionSummary,
   YOLOTimeline,
 } from '@/lib/yoloApi';
 
@@ -52,7 +56,7 @@ export const AnalysisView: React.FC = () => {
   const [modelStatus, setModelStatus] = useState<'checking' | 'ready' | 'offline'>('checking');
   const [modelName, setModelName] = useState<string>('best_5.onnx');
 
-  // Real-time detection state updated during video playback
+  // Real-time detection & team possession state updated during video playback
   const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([]);
   const [liveClassCounts, setLiveClassCounts] = useState<{
     player: number;
@@ -65,6 +69,9 @@ export const AnalysisView: React.FC = () => {
     'football goal': 0,
     'player with ball': 0,
   });
+  const [livePossession, setLivePossession] = useState<PossessionState | null>(null);
+  const [batchPossessionSummary, setBatchPossessionSummary] = useState<PossessionSummary | null>(null);
+  const [possessionEvents, setPossessionEvents] = useState<PossessionEventItem[]>([]);
   const [inferenceLatency, setInferenceLatency] = useState<number>(36);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState<boolean>(false);
@@ -93,11 +100,12 @@ export const AnalysisView: React.FC = () => {
     };
   }, []);
 
-  // Update timeline if active video changes
+  // Update timeline & reset possession state when active video changes
   useEffect(() => {
-    if (activeVideo.timeline) {
-      setTimelineData(activeVideo.timeline as YOLOTimeline);
-    }
+    setTimelineData(activeVideo.timeline as YOLOTimeline | undefined);
+    setLivePossession(null);
+    setBatchPossessionSummary(null);
+    setPossessionEvents([]);
   }, [activeVideo]);
 
   // Callback when TacticalVideoPlayer detects a frame
@@ -105,7 +113,8 @@ export const AnalysisView: React.FC = () => {
     (
       detections: DetectionBox[],
       counts: Record<string, number>,
-      latencyMs: number
+      latencyMs: number,
+      possession?: PossessionState
     ) => {
       setLiveDetections(detections);
       setLiveClassCounts({
@@ -115,6 +124,16 @@ export const AnalysisView: React.FC = () => {
         'player with ball': counts['player with ball'] ?? 0,
       });
       if (latencyMs) setInferenceLatency(latencyMs);
+      if (possession) {
+        setLivePossession(possession);
+        const latestEv = possession.latest_event;
+        if (latestEv) {
+          setPossessionEvents((prev) => {
+            if (prev.some((e) => e.id === latestEv.id)) return prev;
+            return [latestEv, ...prev].slice(0, 50);
+          });
+        }
+      }
     },
     []
   );
@@ -197,9 +216,20 @@ export const AnalysisView: React.FC = () => {
 
     try {
       const filename = activeVideo.filename;
-      const res = await analyzeVideoWithYOLO(filename, 2.5, confidenceThreshold);
+      const res = await analyzeVideoWithYOLO(
+        filename,
+        10.0,
+        confidenceThreshold,
+        classConfidences
+      );
       if (res && res.success) {
         setTimelineData(res.timeline);
+        setBatchPossessionSummary(res.possession_summary ?? null);
+        setPossessionEvents(
+          res.possession_summary?.possession_events
+            ? [...res.possession_summary.possession_events].reverse()
+            : []
+        );
         setBatchProgressMsg(null);
         showToast(`Analyzed ${res.frames_analyzed} frames with model ${modelName}!`);
       }
@@ -222,6 +252,12 @@ export const AnalysisView: React.FC = () => {
       confidence_threshold: confidenceThreshold,
       active_counts: liveClassCounts,
       current_detections: liveDetections,
+      possession:
+        livePossession ||
+        batchPossessionSummary ||
+        activeBackgroundJob?.possession_summary ||
+        null,
+      possession_events: possessionEvents,
       timeline: timelineData || null,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -243,6 +279,63 @@ export const AnalysisView: React.FC = () => {
         100
       ).toFixed(1)
     : '0.0';
+
+  // Derive active team grouping & ball possession state across Live, Batch, and 5s Chunked modes
+  const activeChunkPossession =
+    analysisMode === 'chunked' && activeBackgroundJob && !playFullVideo
+      ? activeBackgroundJob.chunks?.[selectedChunkIndex]?.possession ?? null
+      : null;
+
+  const effectivePossessionState =
+    analysisMode === 'live'
+      ? livePossession
+      : activeChunkPossession || livePossession;
+
+  const effectiveSummary =
+    analysisMode === 'chunked'
+      ? activeBackgroundJob?.possession_summary ?? null
+      : batchPossessionSummary;
+
+  const effectiveTeams =
+    effectivePossessionState?.teams ?? effectiveSummary?.teams ?? null;
+
+  const teamList = effectiveTeams
+    ? [effectiveTeams['1'], effectiveTeams['2']].filter(Boolean)
+    : [];
+
+  const totalPossessionLosses =
+    effectivePossessionState?.total_possession_losses ??
+    effectiveSummary?.total_possession_losses ??
+    0;
+
+  const totalSameTeamPasses =
+    effectivePossessionState?.total_same_team_passes ??
+    effectiveSummary?.total_same_team_passes ??
+    0;
+
+  const effectiveCurrentTeam =
+    effectivePossessionState?.current_team ??
+    effectiveSummary?.current_team ??
+    null;
+
+  const effectiveCurrentTeamLabel =
+    effectivePossessionState?.current_team_label ??
+    effectiveSummary?.current_team_label ??
+    null;
+
+  const effectivePossessionEvents =
+    analysisMode === 'chunked'
+      ? activeBackgroundJob?.possession_summary?.possession_events
+        ? [...activeBackgroundJob.possession_summary.possession_events].reverse()
+        : []
+      : possessionEvents;
+
+  const team1Pct = effectiveTeams?.['1']?.possession_pct ?? 50;
+  const team2Pct = effectiveTeams?.['2']?.possession_pct ?? 50;
+  const hasPossessionSplit =
+    (effectiveTeams?.['1']?.possession_pct ?? 0) +
+      (effectiveTeams?.['2']?.possession_pct ?? 0) >
+    0;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -1024,6 +1117,242 @@ export const AnalysisView: React.FC = () => {
         </div>
       </div>
 
+      {/* 2B. TEAM GROUPING & BALL POSSESSION */}
+      <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <Users className="w-3.5 h-3.5 text-[#2563EB]" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585]">
+              Team Grouping &amp; Ball Possession (Jersey Color Clustering)
+            </span>
+          </div>
+          <div className="flex-1 h-px bg-[#E8E3D8]" />
+          <span className="text-[11px] font-mono text-[#858585] hidden sm:inline">
+            2 Teams • Player w/ Ball Tracking
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          {/* Left: 2 Team Color Cards + Live Possession Status + Counters */}
+          <div className="xl:col-span-7 bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 space-y-4 shadow-2xs">
+            {/* Status Banner */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                effectivePossessionState?.possession_status === 'lost'
+                  ? 'bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]'
+                  : effectivePossessionState?.possession_status === 'not_lost'
+                  ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#166534]'
+                  : effectivePossessionState?.possession_status === 'acquired' ||
+                    effectivePossessionState?.possession_status === 'holding'
+                  ? 'bg-[#EFF6FF] border-[#BFDBFE] text-[#1E40AF]'
+                  : 'bg-[#F5F2EB] border-[#E8E3D8] text-[#404040]'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                {effectivePossessionState?.possession_status === 'lost' ? (
+                  <AlertTriangle className="w-4 h-4 text-[#DC2626] shrink-0" />
+                ) : effectivePossessionState?.possession_status === 'not_lost' ? (
+                  <CheckCircle2 className="w-4 h-4 text-[#16A34A] shrink-0" />
+                ) : (
+                  <ArrowLeftRight className="w-4 h-4 shrink-0" />
+                )}
+                <div>
+                  <div className="text-xs font-extrabold uppercase tracking-wide">
+                    {effectivePossessionState?.possession_status === 'lost'
+                      ? 'Possession Lost — Ball Changed Team'
+                      : effectivePossessionState?.possession_status === 'not_lost'
+                      ? 'Possession Not Lost — Same Team Pass'
+                      : effectivePossessionState?.possession_status === 'holding'
+                      ? 'Holding Possession'
+                      : effectivePossessionState?.possession_status === 'acquired'
+                      ? 'Possession Acquired'
+                      : effectiveCurrentTeamLabel
+                      ? `${effectiveCurrentTeamLabel} Last in Possession`
+                      : 'Awaiting Player-with-Ball Detection'}
+                  </div>
+                  <div className="text-[11px] opacity-85 mt-0.5">
+                    {effectivePossessionState?.status_label ||
+                      'Play video, run Analyze Full Video, or run 5s chunks to cluster player jerseys into Team 1 & Team 2.'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2.5 py-1 rounded-lg bg-white/80 border border-black/10 text-[11px] font-bold">
+                  Losses: {totalPossessionLosses}
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-white/80 border border-black/10 text-[11px] font-bold">
+                  Not Lost: {totalSameTeamPasses}
+                </span>
+              </div>
+            </div>
+
+            {/* Two Teams Grouped by Jersey Color */}
+            {teamList.length > 0 ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {teamList.map((team) => {
+                    const isInPossession = effectiveCurrentTeam === team.id;
+                    return (
+                      <div
+                        key={team.id}
+                        className={`p-3.5 rounded-xl border transition-all ${
+                          isInPossession
+                            ? 'bg-white border-[#242424] shadow-xs'
+                            : 'bg-white/70 border-[#E8E3D8]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              className="w-5 h-5 rounded-full border border-black/20 shrink-0 shadow-2xs"
+                              style={{ backgroundColor: team.color_hex }}
+                              title={`Clustered Jersey Color: ${team.color_hex}`}
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-black text-[#242424] flex items-center gap-1.5">
+                                <span>{team.label}</span>
+                                <span className="text-[11px] font-semibold text-[#666666] truncate">
+                                  ({team.color_name})
+                                </span>
+                              </div>
+                              <div className="text-[10px] font-mono text-[#858585]">
+                                {team.color_hex} • {team.player_count} detected
+                              </div>
+                            </div>
+                          </div>
+
+                          {isInPossession && (
+                            <span className="px-2 py-0.5 rounded-full bg-[#FEF3C7] border border-[#F59E0B] text-[#B45309] text-[10px] font-extrabold uppercase shrink-0">
+                              In Possession
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-[#F0ECE3] text-[11px]">
+                          <div>
+                            <span className="text-[#858585] block">Possession</span>
+                            <span className="font-black text-[#242424] text-sm">
+                              {team.possession_pct}%
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[#858585] block">Losses</span>
+                            <span className="font-black text-[#DC2626] text-sm">
+                              {team.losses}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Possession Split Bar */}
+                {hasPossessionSplit && effectiveTeams?.['1'] && effectiveTeams?.['2'] && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-[#404040]">
+                      <span>
+                        {effectiveTeams['1'].label} ({effectiveTeams['1'].color_name}){' '}
+                        {effectiveTeams['1'].possession_pct}%
+                      </span>
+                      <span>
+                        {effectiveTeams['2'].possession_pct}% {effectiveTeams['2'].label} (
+                        {effectiveTeams['2'].color_name})
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 rounded-full overflow-hidden flex bg-[#EEEBE3] border border-[#E8E3D8]">
+                      <div
+                        className="h-full transition-all duration-300"
+                        style={{
+                          width: `${team1Pct}%`,
+                          backgroundColor: effectiveTeams['1'].color_hex,
+                        }}
+                      />
+                      <div
+                        className="h-full transition-all duration-300"
+                        style={{
+                          width: `${team2Pct}%`,
+                          backgroundColor: effectiveTeams['2'].color_hex,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="p-4 rounded-xl bg-white/60 border border-dashed border-[#D8D1C3] text-center text-xs text-[#858585]">
+                No jersey clusters learned yet — run live playback, batch analysis, or 5s annotation to group detected players into Team 1 and Team 2.
+              </div>
+            )}
+          </div>
+
+          {/* Right: Chronological Possession Transition Log */}
+          <div className="xl:col-span-5 bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 flex flex-col shadow-2xs">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#242424]">
+                  Possession Transition Log
+                </h4>
+                <p className="text-[11px] text-[#858585]">
+                  Team change = Possession Lost • Same team = Not Lost
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-[#EEEBE3] text-[#404040] text-[10px] font-mono font-bold">
+                {effectivePossessionEvents.length} events
+              </span>
+            </div>
+
+            {effectivePossessionEvents.length > 0 ? (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {effectivePossessionEvents.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-2.5 rounded-xl bg-white border border-[#E8E3D8] flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#F5F2EB] text-[#404040] font-bold">
+                          {typeof ev.timestamp === 'number' ? `${ev.timestamp.toFixed(1)}s` : '0.0s'}
+                        </span>
+                        <span className="font-semibold text-[#242424] truncate">
+                          {ev.from_team_label
+                            ? `${ev.from_team_label} #${ev.from_player_id ?? '?'} → ${ev.to_team_label ?? 'Team ?'} #${ev.to_player_id ?? '?'}`
+                            : `${ev.to_team_label ?? 'Team ?'} #${ev.to_player_id ?? '?'} Started`}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#858585] truncate mt-0.5">
+                        {ev.status_label}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase shrink-0 ${
+                        ev.possession_lost
+                          ? 'bg-[#FEE2E2] text-[#B91C1C]'
+                          : ev.type === 'not_lost'
+                          ? 'bg-[#DCFCE7] text-[#15803D]'
+                          : 'bg-[#DBEAFE] text-[#1D4ED8]'
+                      }`}
+                    >
+                      {ev.possession_lost
+                        ? 'Possession Lost'
+                        : ev.type === 'not_lost'
+                        ? 'Not Lost'
+                        : 'Acquired'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex-1 min-h-36 flex items-center justify-center rounded-xl bg-white/60 border border-dashed border-[#D8D1C3] p-4 text-center text-xs text-[#858585]">
+                Possession changes between players and teams will appear here once a ball carrier (`player with ball`) is detected across frames.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* 3. KEY MATCH & DETECTION METRICS */}
       <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">
         <div className="flex items-center gap-4">
@@ -1074,11 +1403,29 @@ export const AnalysisView: React.FC = () => {
             <span className="text-xs text-[#858585] font-medium block">
               Possession Carrier
             </span>
-            <span className="text-2xl font-black mt-1 block text-[#059669]">
-              {liveClassCounts['player with ball'] > 0 ? 'Active' : 'Pass in Flight'}
+            <span
+              className={`text-2xl font-black mt-1 block ${
+                effectivePossessionState?.possession_status === 'lost'
+                  ? 'text-[#DC2626]'
+                  : 'text-[#059669]'
+              }`}
+            >
+              {effectivePossessionState?.possession_status === 'lost'
+                ? 'Possession Lost!'
+                : effectivePossessionState?.possession_status === 'not_lost'
+                ? 'Not Lost (Same Team)'
+                : liveClassCounts['player with ball'] > 0
+                ? effectiveCurrentTeamLabel
+                  ? `${effectiveCurrentTeamLabel} • Holding`
+                  : 'Active'
+                : effectiveCurrentTeamLabel
+                ? `${effectiveCurrentTeamLabel} • Last`
+                : 'Pass in Flight'}
             </span>
             <span className="text-[11px] text-[#858585] mt-1 block">
-              Class: player with ball
+              {effectivePossessionState?.carrier
+                ? `Player #${effectivePossessionState.carrier.track_id} • Losses: ${totalPossessionLosses} • Passes: ${totalSameTeamPasses}`
+                : `Losses: ${totalPossessionLosses} • Same-Team: ${totalSameTeamPasses}`}
             </span>
           </div>
         </div>

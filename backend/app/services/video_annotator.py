@@ -11,6 +11,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from app.services.team_possession import TeamPossessionTracker
+
 try:
     import imageio_ffmpeg
 
@@ -47,6 +49,8 @@ def draw_hud_header(
     start_sec: float,
     end_sec: float,
     counts: dict[str, int],
+    possession: dict[str, Any] | None = None,
+    banner_event: dict[str, Any] | None = None,
 ) -> None:
     """Draws a sleek tactical status bar at the top of the video frame."""
     h, w = frame.shape[:2]
@@ -61,14 +65,22 @@ def draw_hud_header(
     chunk_info = (
         f"5s CHUNK {chunk_idx + 1}/{total_chunks} [{start_sec:.1f}s - {end_sec:.1f}s]"
     )
+    poss_segment = ""
+    if possession and possession.get("current_team"):
+        t_id = possession["current_team"]
+        t_info = (possession.get("teams") or {}).get(str(t_id), {})
+        t_cname = t_info.get("color_name", f"Team {t_id}")
+        losses = possession.get("total_possession_losses", 0)
+        poss_segment = f" | Poss: T{t_id} ({t_cname}) | Losses: {losses}"
+
     stats_info = (
         f"Players: {counts.get('player', 0)} | "
         f"Ball: {counts.get('football', 0)} | "
-        f"Goals: {counts.get('football goal', 0)} | "
         f"Ball-carrier: {counts.get('player with ball', 0)}"
+        f"{poss_segment}"
     )
 
-    font_scale = max(0.4, w / 2200.0)
+    font_scale = max(0.38, w / 2400.0)
     thickness = 1
 
     # Left indicator
@@ -88,7 +100,7 @@ def draw_hud_header(
     (text_w, _), _ = cv2.getTextSize(
         stats_info, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
     )
-    right_x = max(w - text_w - 16, w // 2)
+    right_x = max(w - text_w - 16, w // 2 - 40)
     cv2.putText(
         frame,
         stats_info,
@@ -99,6 +111,35 @@ def draw_hud_header(
         thickness,
         cv2.LINE_AA,
     )
+
+    # Possession transition alert banner directly below HUD
+    if banner_event:
+        ev_type = banner_event.get("type")
+        is_lost = ev_type == "lost"
+        banner_bg = (38, 38, 220) if is_lost else (40, 150, 40)
+        banner_text = banner_event.get(
+            "status_label",
+            "POSSESSION LOST!" if is_lost else "POSSESSION NOT LOST (SAME TEAM)",
+        )
+        (bw, bh), _ = cv2.getTextSize(
+            banner_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale * 1.1, 2
+        )
+        bx1 = max(12, (w - bw) // 2 - 14)
+        bx2 = min(w - 12, bx1 + bw + 28)
+        by1 = header_h + 8
+        by2 = by1 + bh + 14
+        cv2.rectangle(frame, (bx1, by1), (bx2, by2), banner_bg, -1)
+        cv2.rectangle(frame, (bx1, by1), (bx2, by2), (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            banner_text,
+            (bx1 + 14, by2 - 7),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale * 1.1,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
 
 def draw_detection_box(
@@ -123,12 +164,31 @@ def draw_detection_box(
     if x2 <= x1 or y2 <= y1:
         return
 
-    cls_name = det.get("class", "object")
+    cls_name = str(det.get("class", "object")).lower().strip()
     conf = float(det.get("confidence", 0.0))
-    color = get_class_color(cls_name)
+
+    team_bgr = det.get("team_color_bgr")
+    if team_bgr and len(team_bgr) == 3 and cls_name in ("player", "player with ball"):
+        color = (int(team_bgr[0]), int(team_bgr[1]), int(team_bgr[2]))
+    else:
+        color = get_class_color(cls_name)
+
+    is_carrier = cls_name == "player with ball"
+    box_thickness = 3 if is_carrier else 2
 
     # Main bounding rectangle
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, box_thickness, cv2.LINE_AA)
+
+    # Highlight outer gold ring for active ball carrier
+    if is_carrier:
+        cv2.rectangle(
+            frame,
+            (max(0, x1 - 3), max(0, y1 - 3)),
+            (min(w - 1, x2 + 3), min(h - 1, y2 + 3)),
+            (0, 215, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
     # Tactical corner markers
     corner_len = max(6, min(20, int((x2 - x1) * 0.2)))
@@ -141,8 +201,18 @@ def draw_detection_box(
     cv2.line(frame, (x2, y2), (x2 - corner_len, y2), color, 3, cv2.LINE_AA)
     cv2.line(frame, (x2, y2), (x2, y2 - corner_len), color, 3, cv2.LINE_AA)
 
-    # Label text: e.g. "football goal 38%"
-    label_text = f"{cls_name.capitalize()} {int(conf * 100)}%"
+    # Label text: show Team & Track ID when grouped
+    team_num = det.get("team")
+    track_id = det.get("track_id")
+    if is_carrier and team_num:
+        id_str = f"#{track_id} " if track_id else ""
+        label_text = f"BALL T{team_num} {id_str}{int(conf * 100)}%"
+    elif cls_name == "player" and team_num:
+        id_str = f"#{track_id} " if track_id else ""
+        label_text = f"T{team_num} {id_str}{int(conf * 100)}%"
+    else:
+        label_text = f"{cls_name.capitalize()} {int(conf * 100)}%"
+
     font_scale = max(0.35, min(0.65, w / 2400.0))
     thickness = 1
     (lbl_w, lbl_h), _baseline = cv2.getTextSize(
@@ -279,6 +349,7 @@ def run_chunked_annotation_worker(
     burn_boxes: bool,
     parse_detections_fn: Any,
     model_obj: Any,
+    infer_fps: float = 15.0,
 ) -> None:
     """Worker function executing in a background thread to annotate 5s chunks progressively."""
     logger.info(f"Starting chunked annotation job {job_id} for {video_source_path}")
@@ -294,6 +365,9 @@ def run_chunked_annotation_worker(
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
         duration_sec = total_frames / fps if fps > 0 else 0.0
 
+        safe_infer_fps = max(0.5, float(infer_fps))
+        infer_interval = max(1, round(fps / safe_infer_fps))
+
         chunk_frames_target = max(1, round(fps * chunk_duration_sec))
         total_chunks = (
             max(1, math.ceil(total_frames / chunk_frames_target))
@@ -307,11 +381,18 @@ def run_chunked_annotation_worker(
                 JOBS[job_id]["duration_sec"] = round(duration_sec, 2)
                 JOBS[job_id]["fps"] = round(fps, 1)
                 JOBS[job_id]["resolution"] = f"{width}x{height}"
+                JOBS[job_id]["infer_fps"] = round(min(fps, safe_infer_fps), 1)
+                JOBS[job_id]["infer_interval"] = infer_interval
 
         output_dir.mkdir(parents=True, exist_ok=True)
         chunk_files: list[Path] = []
         frame_idx = 0
         chunk_idx = 0
+
+        tracker = TeamPossessionTracker()
+        active_banner_event: dict[str, Any] | None = None
+        banner_frames_remaining = 0
+        banner_duration_frames = max(1, round(fps * 1.8))
 
         while True:
             current_chunk_frames: list[np.ndarray] = []
@@ -326,9 +407,8 @@ def run_chunked_annotation_worker(
 
             # Read frames for this chunk
             frames_in_this_chunk = 0
-            # Sample inference ~3 times per second so 5s chunks complete rapidly (~12s) without boring viewers
-            infer_interval = max(1, round(fps / 3.0))
             latest_parsed = {"detections": [], "class_counts": {}}
+            latest_possession: dict[str, Any] | None = None
 
             while frames_in_this_chunk < chunk_frames_target:
                 ret, frame = cap.read()
@@ -346,6 +426,16 @@ def run_chunked_annotation_worker(
                             conf_threshold=confidence_threshold,
                             class_confidences=class_confidences,
                         )
+                        curr_timestamp = round(frame_idx / fps, 2)
+                        latest_possession = tracker.process_frame(
+                            frame,
+                            latest_parsed.get("detections", []),
+                            timestamp=curr_timestamp,
+                        )
+                        latest_ev = latest_possession.get("latest_event")
+                        if latest_ev and latest_ev.get("type") in ("lost", "not_lost"):
+                            active_banner_event = latest_ev
+                            banner_frames_remaining = banner_duration_frames
                     except Exception as model_err:  # noqa: BLE001
                         logger.warning(f"Model inference exception: {model_err}")
                         latest_parsed = {"detections": [], "class_counts": {}}
@@ -357,6 +447,9 @@ def run_chunked_annotation_worker(
 
                 detections = latest_parsed.get("detections", [])
                 counts = latest_parsed.get("class_counts", {})
+                banner_to_draw = active_banner_event if banner_frames_remaining > 0 else None
+                if banner_frames_remaining > 0:
+                    banner_frames_remaining -= 1
 
                 # Draw annotations onto the frame
                 if burn_boxes:
@@ -370,6 +463,8 @@ def run_chunked_annotation_worker(
                         start_sec=chunk_start_sec,
                         end_sec=chunk_start_sec + (frames_in_this_chunk / fps),
                         counts=counts,
+                        possession=latest_possession,
+                        banner_event=banner_to_draw,
                     )
 
                 current_chunk_frames.append(frame)
@@ -403,6 +498,7 @@ def run_chunked_annotation_worker(
                     "counts": chunk_class_counts,
                     "detections_count": chunk_total_detections,
                     "frames": len(current_chunk_frames),
+                    "possession": latest_possession,
                 }
 
                 with JOBS_LOCK:
@@ -415,6 +511,7 @@ def run_chunked_annotation_worker(
                             1,
                         )
                         JOBS[job_id]["current_chunk_processing"] = chunk_idx + 1
+                        JOBS[job_id]["possession_summary"] = tracker.get_summary()
 
                 logger.info(
                     f"Job {job_id}: Chunk {chunk_idx + 1}/{total_chunks} "
@@ -447,6 +544,7 @@ def run_chunked_annotation_worker(
                 JOBS[job_id]["full_relative_url"] = (
                     f"/api/videos/jobs/{job_id}/full_annotated.mp4"
                 )
+                JOBS[job_id]["possession_summary"] = tracker.get_summary()
 
         logger.info(f"Job {job_id} completely finished with {len(chunk_files)} chunks!")
 
@@ -467,6 +565,7 @@ def create_annotation_job(
     burn_boxes: bool = True,
     parse_detections_fn: Any = None,
     model_obj: Any = None,
+    infer_fps: float = 15.0,
 ) -> dict[str, Any]:
     """Initializes and launches a background chunked video annotation job."""
     job_id = f"job_{uuid.uuid4().hex[:10]}"
@@ -490,10 +589,13 @@ def create_annotation_job(
         "duration_sec": 0.0,
         "chunk_duration_sec": chunk_duration_sec,
         "confidence_threshold": confidence_threshold,
+        "infer_fps": float(infer_fps),
+        "infer_interval": 1,
         "class_confidences": class_confs,
         "chunks": [],
         "full_video_url": None,
         "full_relative_url": None,
+        "possession_summary": None,
         "error": None,
         "created_at": time.time(),
     }
@@ -513,6 +615,7 @@ def create_annotation_job(
             "burn_boxes": burn_boxes,
             "parse_detections_fn": parse_detections_fn,
             "model_obj": model_obj,
+            "infer_fps": infer_fps,
         },
         daemon=True,
     )

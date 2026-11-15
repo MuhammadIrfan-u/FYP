@@ -13,6 +13,72 @@ export function normalizeVideoUrl(url: string | null | undefined): string {
   return url.replace(/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/, YOLO_API_BASE);
 }
 
+export interface TeamClusterInfo {
+  id: number;
+  label: string;
+  color_hex: string;
+  color_rgb: number[];
+  color_bgr?: number[];
+  color_name: string;
+  player_count: number;
+  possession_frames: number;
+  possession_pct: number;
+  losses: number;
+}
+
+export interface PossessionCarrier {
+  track_id: number | null;
+  detection_id?: string;
+  team: number;
+  team_label: string;
+  team_color_hex?: string;
+  team_color_name?: string;
+  confidence?: number;
+  x?: number;
+  y?: number;
+}
+
+export interface PossessionEventItem {
+  id: string;
+  timestamp: number;
+  type: 'acquired' | 'not_lost' | 'lost';
+  from_team: number | null;
+  to_team: number;
+  from_team_label?: string | null;
+  to_team_label: string;
+  from_player_id: number | null;
+  to_player_id: number | null;
+  possession_lost: boolean;
+  status_label: string;
+}
+
+export interface PossessionState {
+  teams: Record<string, TeamClusterInfo>;
+  carrier: PossessionCarrier | null;
+  current_team: number | null;
+  current_team_label: string | null;
+  previous_team: number | null;
+  previous_carrier_id: number | null;
+  player_changed: boolean;
+  team_changed: boolean;
+  possession_lost: boolean;
+  possession_status: 'acquired' | 'holding' | 'not_lost' | 'lost' | 'in_transit' | 'no_carrier';
+  status_label: string;
+  total_possession_losses: number;
+  total_same_team_passes: number;
+  latest_event: PossessionEventItem | null;
+}
+
+export interface PossessionSummary {
+  teams: Record<string, TeamClusterInfo>;
+  current_team: number | null;
+  current_team_label: string | null;
+  total_possession_losses: number;
+  total_same_team_passes: number;
+  possession_events: PossessionEventItem[];
+  frames_processed?: number;
+}
+
 export interface YOLODetectionItem {
   id: string;
   class: string;
@@ -22,6 +88,14 @@ export interface YOLODetectionItem {
   y: number; // percentage
   w: number; // percentage
   h: number; // percentage
+  track_id?: number;
+  team?: number;
+  team_label?: string;
+  team_color_hex?: string;
+  team_color_rgb?: number[];
+  team_color_name?: string;
+  jersey_color_hex?: string;
+  has_ball?: boolean;
 }
 
 export interface YOLOFrameAnalysisResult {
@@ -36,6 +110,7 @@ export interface YOLOFrameAnalysisResult {
   };
   total_detections: number;
   inference_time_ms: number;
+  possession?: PossessionState;
 }
 
 export interface YOLOVideoUploadResult {
@@ -54,6 +129,7 @@ export type YOLOTimeline = Record<string, {
   timestamp: number;
   detections: YOLODetectionItem[];
   counts: Record<string, number>;
+  possession?: PossessionState;
 }>;
 
 export interface YOLOVideoAnalysisResult {
@@ -66,6 +142,7 @@ export interface YOLOVideoAnalysisResult {
   timeline: YOLOTimeline;
   peak_class_counts: Record<string, number>;
   avg_class_counts: Record<string, number>;
+  possession_summary?: PossessionSummary;
 }
 
 export async function checkYOLOStatus(): Promise<{
@@ -100,7 +177,12 @@ export async function checkYOLOStatus(): Promise<{
 export async function analyzeFrameWithYOLO(
   imageBase64: string,
   confidenceThreshold: number = 0.25,
-  classConfidences?: Record<string, number>
+  classConfidences?: Record<string, number>,
+  sessionOptions?: {
+    sessionId?: string;
+    timestamp?: number;
+    resetSession?: boolean;
+  }
 ): Promise<YOLOFrameAnalysisResult> {
   const bodyPayload: Record<string, unknown> = {
     image: imageBase64,
@@ -108,6 +190,15 @@ export async function analyzeFrameWithYOLO(
   };
   if (classConfidences) {
     bodyPayload.class_confidences = classConfidences;
+  }
+  if (sessionOptions?.sessionId) {
+    bodyPayload.session_id = sessionOptions.sessionId;
+  }
+  if (sessionOptions?.timestamp !== undefined) {
+    bodyPayload.timestamp = sessionOptions.timestamp;
+  }
+  if (sessionOptions?.resetSession) {
+    bodyPayload.reset_session = true;
   }
 
   const res = await fetch(`${YOLO_API_BASE}/api/analyze-frame`, {
@@ -150,7 +241,7 @@ export async function uploadVideoToYOLO(file: File): Promise<YOLOVideoUploadResu
 
 export async function analyzeVideoWithYOLO(
   fileOrFilename: File | string,
-  sampleFps: number = 2.0,
+  sampleFps: number = 10.0,
   confidenceThreshold: number = 0.25,
   classConfidences?: Record<string, number>
 ): Promise<YOLOVideoAnalysisResult> {
@@ -193,6 +284,7 @@ export interface AnnotatedChunk {
   counts: Record<string, number>;
   detections_count: number;
   frames: number;
+  possession?: PossessionState | null;
 }
 
 export interface BackgroundAnnotationJob {
@@ -205,10 +297,13 @@ export interface BackgroundAnnotationJob {
   duration_sec: number;
   chunk_duration_sec: number;
   confidence_threshold: number;
+  infer_fps?: number;
+  infer_interval?: number;
   class_confidences: Record<string, number>;
   chunks: AnnotatedChunk[];
   full_video_url: string | null;
   full_relative_url: string | null;
+  possession_summary?: PossessionSummary | null;
   error: string | null;
 }
 
@@ -220,11 +315,13 @@ export async function startBackgroundAnnotation(options: {
   confidenceThreshold?: number;
   classConfidences?: Record<string, number>;
   burnBoxes?: boolean;
+  inferFps?: number;
 }): Promise<{
   success: boolean;
   job_id: string;
   status: string;
   chunk_duration: number;
+  infer_fps?: number;
   class_confidences: Record<string, number>;
   message: string;
 }> {
@@ -235,6 +332,7 @@ export async function startBackgroundAnnotation(options: {
   formData.append('chunk_duration', (options.chunkDuration ?? 5.0).toString());
   formData.append('confidence_threshold', (options.confidenceThreshold ?? 0.25).toString());
   formData.append('burn_boxes', (options.burnBoxes ?? true).toString());
+  formData.append('infer_fps', (options.inferFps ?? 15.0).toString());
 
   if (options.classConfidences) {
     formData.append('class_confidences', JSON.stringify(options.classConfidences));
