@@ -4,10 +4,15 @@
  */
 
 import type {
+  CalibrationResult,
   DetectionBox,
   DetectionClass,
+  MatchStats,
+  PitchLandmark,
+  PlacedLandmark,
   PossessionState,
   PossessionSummary,
+  TacticalHeatmaps,
 } from '@/types/football';
 
 export const YOLO_API_BASE = process.env.NEXT_PUBLIC_YOLO_API_URL || 'http://127.0.0.1:8000';
@@ -271,6 +276,29 @@ export interface AnnotatedChunk {
     total_passes: number;
     events: PossessionSummary['events'];
   };
+  match_events?: MatchStats['events'];
+}
+
+export interface MatchLogUrls {
+  players_csv: string;
+  ball_csv: string;
+  events_json: string;
+  match_stats_json: string;
+  heatmaps_json?: string;
+}
+
+/** Tactical heatmaps (team x phase, ball, per player) for a background job. */
+export async function fetchTacticalHeatmaps(url: string): Promise<TacticalHeatmaps | null> {
+  try {
+    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}`, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export interface BackgroundAnnotationJob {
@@ -287,6 +315,12 @@ export interface BackgroundAnnotationJob {
   infer_fps?: number;
   infer_interval_frames?: number | null;
   possession_summary?: PossessionSummary | null;
+  /** True when a landmark (homography) calibration was applied. */
+  calibrated?: boolean;
+  match_stats?: MatchStats | null;
+  logs?: MatchLogUrls | null;
+  resolution?: string;
+  output_resolution?: string;
   chunks: AnnotatedChunk[];
   full_video_url: string | null;
   full_relative_url: string | null;
@@ -303,6 +337,10 @@ export async function startBackgroundAnnotation(options: {
   burnBoxes?: boolean;
   /** Inference rate for chunk rendering (15 fps = 2-frame stride on 30 fps video). */
   inferFps?: number;
+  /** Refuse to start when no landmark calibration is saved for the video. */
+  requireCalibration?: boolean;
+  /** Only analyse the first N seconds (useful for long full-match videos). */
+  maxDuration?: number;
 }): Promise<{
   success: boolean;
   job_id: string;
@@ -320,6 +358,10 @@ export async function startBackgroundAnnotation(options: {
   formData.append('confidence_threshold', (options.confidenceThreshold ?? 0.25).toString());
   formData.append('burn_boxes', (options.burnBoxes ?? true).toString());
   formData.append('infer_fps', (options.inferFps ?? 15.0).toString());
+  if (options.requireCalibration) formData.append('require_calibration', 'true');
+  if (options.maxDuration && options.maxDuration > 0) {
+    formData.append('max_duration', options.maxDuration.toString());
+  }
 
   if (options.classConfidences) {
     formData.append('class_confidences', JSON.stringify(options.classConfidences));
@@ -350,6 +392,15 @@ export async function getBackgroundJobStatus(jobId: string): Promise<BackgroundA
   }
 
   const job: BackgroundAnnotationJob = await res.json();
+  if (job.logs) {
+    job.logs = {
+      players_csv: normalizeVideoUrl(job.logs.players_csv),
+      ball_csv: normalizeVideoUrl(job.logs.ball_csv),
+      events_json: normalizeVideoUrl(job.logs.events_json),
+      match_stats_json: normalizeVideoUrl(job.logs.match_stats_json),
+      heatmaps_json: job.logs.heatmaps_json ? normalizeVideoUrl(job.logs.heatmaps_json) : undefined,
+    };
+  }
   if (job.full_video_url) {
     job.full_video_url = normalizeVideoUrl(job.full_relative_url || job.full_video_url);
   }
@@ -382,6 +433,75 @@ export async function listBackgroundJobs(): Promise<BackgroundAnnotationJob[]> {
       video_url: normalizeVideoUrl(chunk.relative_url || chunk.video_url),
     })),
   }));
+}
+
+/* ---------- Pitch calibration (drag-and-drop landmarks) ---------- */
+
+export async function getPitchLandmarks(
+  length = 105,
+  width = 68
+): Promise<{ landmarks: PitchLandmark[]; min_points: number; recommended_points: number }> {
+  const res = await fetch(
+    `${YOLO_API_BASE}/api/pitch/landmarks?length=${length}&width=${width}`,
+    { headers: { Accept: 'application/json' } }
+  );
+  if (!res.ok) throw new Error(`Failed to load pitch landmarks (${res.status})`);
+  return res.json();
+}
+
+/** JPEG frame of an uploaded video used as the calibration canvas. */
+export function videoFrameUrl(videoFilename: string, t = 1.0): string {
+  const params = new URLSearchParams({ video_filename: videoFilename, t: t.toString() });
+  return `${YOLO_API_BASE}/api/video-frame?${params.toString()}`;
+}
+
+export async function computeHomography(payload: {
+  videoFilename: string;
+  imageWidth: number;
+  imageHeight: number;
+  pitchLength: number;
+  pitchWidth: number;
+  points: PlacedLandmark[];
+  save?: boolean;
+}): Promise<CalibrationResult> {
+  const res = await fetch(`${YOLO_API_BASE}/api/homography`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      video_filename: payload.videoFilename,
+      image_width: payload.imageWidth,
+      image_height: payload.imageHeight,
+      pitch_length: payload.pitchLength,
+      pitch_width: payload.pitchWidth,
+      points: payload.points,
+      save: payload.save ?? true,
+    }),
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const body = await res.json();
+      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // keep status code
+    }
+    throw new Error(`Calibration failed: ${detail}`);
+  }
+  return res.json();
+}
+
+/** Saved calibration for a video, or null if none exists. */
+export async function getSavedHomography(videoFilename: string): Promise<CalibrationResult | null> {
+  try {
+    const res = await fetch(
+      `${YOLO_API_BASE}/api/homography?video_filename=${encodeURIComponent(videoFilename)}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export interface SyncVideosPayload {

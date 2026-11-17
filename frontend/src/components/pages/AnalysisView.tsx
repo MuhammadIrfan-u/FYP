@@ -23,6 +23,8 @@ import {
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
+import { PitchCalibrationModal } from '@/components/common/PitchCalibrationModal';
+import { MatchStatsPanel } from '@/components/common/MatchStatsPanel';
 import {
   DetectionBox,
   PossessionCarrier,
@@ -36,6 +38,7 @@ import {
   analyzeVideoWithYOLO,
   checkYOLOStatus,
   getBackgroundJobStatus,
+  getSavedHomography,
   YOLOTimeline,
 } from '@/lib/yoloApi';
 
@@ -274,14 +277,28 @@ export const AnalysisView: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeBackgroundJob, setActiveBackgroundJob]);
 
-  // Handle re-triggering background 5s chunked annotation
-  const handleTriggerBackgroundAnnotation = async () => {
+  const [showCalibration, setShowCalibration] = useState<boolean>(false);
+
+  // Handle re-triggering background 5s chunked annotation.
+  // The pitch landmarks (homography) must be placed before analysis starts.
+  const handleTriggerBackgroundAnnotation = async (skipCalibrationCheck = false) => {
+    if (!skipCalibrationCheck) {
+      const saved = await getSavedHomography(activeVideo.savedFilename || activeVideo.filename);
+      if (!saved) {
+        showToast('Place the pitch landmarks first to calibrate the full-field view.');
+        setShowCalibration(true);
+        return;
+      }
+    }
     setIsReannotating(true);
     setSelectedChunkIndex(0);
     setPlayFullVideo(false);
     try {
       showToast('Starting 5-second background annotation pipeline...');
-      const job = await startBackgroundSession(activeVideo, classConfidences);
+      const job = await startBackgroundSession(activeVideo, classConfidences, {
+        inferFps: 5,
+        requireCalibration: true,
+      });
       if (job) {
         showToast('Background annotation started! First 5s subvideo will stream shortly.');
       }
@@ -491,7 +508,7 @@ export const AnalysisView: React.FC = () => {
                     : 'Ready to start'}
                 </span>
                 <button
-                  onClick={handleTriggerBackgroundAnnotation}
+                  onClick={() => handleTriggerBackgroundAnnotation()}
                   disabled={isReannotating}
                   className="px-3 py-1.5 rounded-xl bg-[#262626] hover:bg-[#171717] text-white font-semibold flex items-center gap-1 text-xs cursor-pointer disabled:opacity-50"
                   title="Re-run background annotation with current class confidence thresholds"
@@ -649,7 +666,7 @@ export const AnalysisView: React.FC = () => {
                     Partition this video into 5s subvideos with per-class confidence filtering (Football Goal 35%, Football 30%, Player 25%).
                   </p>
                   <button
-                    onClick={handleTriggerBackgroundAnnotation}
+                    onClick={() => handleTriggerBackgroundAnnotation()}
                     disabled={isReannotating}
                     className="px-5 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-xs"
                   >
@@ -1153,6 +1170,58 @@ export const AnalysisView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* MATCH ANALYTICS (pitch-calibrated: possession, passes, goals, logs) */}
+      {analysisMode === 'chunked' && activeBackgroundJob && (
+        <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">
+          <div className="flex items-center gap-4">
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#858585] whitespace-nowrap">
+              Match Analytics (pitch view)
+            </span>
+            <div className="flex-1 h-px bg-[#E8E3D8]" />
+            <button
+              onClick={() => setShowCalibration(true)}
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#EEEBE3] text-[#404040] hover:bg-[#E8E3D8] cursor-pointer"
+            >
+              Edit pitch landmarks
+            </button>
+          </div>
+          {activeBackgroundJob.match_stats ? (
+            <MatchStatsPanel
+              stats={activeBackgroundJob.match_stats}
+              logs={activeBackgroundJob.logs}
+              teams={activeBackgroundJob.possession_summary?.teams}
+              onSeek={(t) => {
+                const idx = activeBackgroundJob.chunks.findIndex(
+                  (c) => t >= c.start_time && t < c.end_time
+                );
+                if (idx >= 0) {
+                  setPlayFullVideo(false);
+                  setSelectedChunkIndex(idx);
+                }
+              }}
+            />
+          ) : (
+            <div className="p-4 rounded-2xl bg-[#FAF8F4] border border-[#E8E3D8] text-xs text-[#858585]">
+              {activeBackgroundJob.calibrated === false
+                ? 'This job ran without a pitch calibration, so pitch-based possession, passes and goals are unavailable. Place the landmarks and re-run.'
+                : 'Waiting for the first 5-second chunk to finish…'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCalibration && (
+        <PitchCalibrationModal
+          video={activeVideo}
+          onClose={() => setShowCalibration(false)}
+          continueLabel="Save & start analysis"
+          onCalibrated={() => {
+            setShowCalibration(false);
+            handleTriggerBackgroundAnnotation(true);
+          }}
+        />
+      )}
 
       {/* 3. TEAM GROUPING & BALL POSSESSION */}
       <div className="space-y-4 pt-4 border-t border-[#E8E3D8]">

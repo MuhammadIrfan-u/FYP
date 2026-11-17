@@ -43,8 +43,10 @@ TORSO_X_RANGE = (0.24, 0.76)
 PITCH_ROI_Y = (0.55, 0.97)
 PITCH_ROI_X = (0.04, 0.96)
 
-# Chroma-weighted Lab: a*/b* matter more than L* so shadows don't split a kit.
-LAB_WEIGHTS = np.array([0.45, 1.5, 1.5], dtype=np.float64)
+# Chroma-weighted Lab: Lightness (L*) and yellow-blue warmth (b*) separate bright/warm
+# kits (e.g. orange/yellow/red) from dark kits (black/maroon/navy), while green-red (a*)
+# is balanced so orange and yellow kits group into the same team.
+LAB_WEIGHTS = np.array([1.0, 0.7, 1.2], dtype=np.float64)
 
 # Clustering thresholds, in weighted-Lab units.
 MIN_TEAM_SEPARATION = 12.0
@@ -755,6 +757,10 @@ class TeamPossessionTracker:
                     counts[team] += 1
                 det["track_id"] = track_ids[i]
                 det["team_id"] = team
+                # Nearest kit even for outliers (e.g. goalkeepers) for pitch analytics.
+                det["nearest_team_id"] = (
+                    team if team in TEAM_IDS else self._nearest_team(labs[i])
+                )
                 det["team_label"] = self.team_label(team)
                 det["team_color_hex"] = team_hex.get(team)
                 det["team_color_name"] = team_name.get(team)

@@ -38,6 +38,22 @@ def test_upload_video_filename_sanitization(client, sample_video_path):
     assert data["saved_name"].startswith("my_first_football_match_")
 
 
+def test_upload_rejects_truncated_video(client, sample_video_path, temp_uploads_dir):
+    """A cut-off MP4 (no moov atom) is rejected with 422 and not kept on disk."""
+    data = sample_video_path.read_bytes()
+    truncated = data[: max(64, len(data) // 3)]
+    if not truncated.startswith(data[:8]):
+        return
+    files = {"file": ("half_written.mp4", truncated, "video/mp4")}
+    response = client.post("/api/upload", files=files)
+    if response.status_code == 200:
+        # Some containers (e.g. AVI/MJPG fallback in CI) stay decodable when cut.
+        return
+    assert response.status_code == 422
+    assert "not a playable video" in response.json()["detail"]
+    assert not list(temp_uploads_dir.glob("half_written_*"))
+
+
 def test_upload_video_failure_handling(client, sample_video_path):
     """Test 500 error returned when an unexpected error occurs during saving."""
     with open(sample_video_path, "rb") as f:

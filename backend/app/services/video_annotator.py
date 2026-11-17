@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import shutil
@@ -435,6 +436,282 @@ def concatenate_chunks_ffmpeg(
         return False
 
 
+MAX_OUTPUT_WIDTH = 1920
+TEAM_FALLBACK_BGR = {1: (235, 160, 40), 2: (40, 60, 230)}
+EVENT_BANNER_STYLE = {
+    "goal": ("GOAL!", (0, 190, 255)),
+    "pass": ("PASS", NOT_LOST_GREEN),
+    "interception": ("INTERCEPTION", LOST_RED),
+    "tackle": ("BALL WON", LOST_RED),
+    "out": ("OUT OF PLAY", (120, 120, 120)),
+}
+
+
+def output_size(
+    width: int, height: int, max_width: int = MAX_OUTPUT_WIDTH
+) -> tuple[int, int]:
+    """Even output dimensions, downscaled so wide panoramas stay light to stream."""
+    if width > max_width:
+        scale = max_width / width
+        width, height = max_width, round(height * scale)
+    return width - width % 2, height - height % 2
+
+
+class StreamingChunkEncoder:
+    """Pipes frames straight into ffmpeg so a chunk is never buffered in RAM."""
+
+    def __init__(self, output_path: Path, fps: float, width: int, height: int):
+        self.output_path = output_path
+        self.width, self.height = width, height
+        self.frames = 0
+        cmd = [
+            FFMPEG_EXE,
+            "-y",
+            "-f",
+            "rawvideo",
+            "-vcodec",
+            "rawvideo",
+            "-s",
+            f"{width}x{height}",
+            "-pix_fmt",
+            "bgr24",
+            "-r",
+            str(fps),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        self.proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def write(self, frame: np.ndarray) -> None:
+        if frame.shape[1] != self.width or frame.shape[0] != self.height:
+            frame = cv2.resize(
+                frame, (self.width, self.height), interpolation=cv2.INTER_AREA
+            )
+        try:
+            self.proc.stdin.write(frame.tobytes())
+            self.frames += 1
+        except (BrokenPipeError, OSError) as e:
+            logger.error(f"FFmpeg pipe error for {self.output_path}: {e}")
+
+    def close(self) -> bool:
+        try:
+            if self.proc.stdin:
+                self.proc.stdin.close()
+            self.proc.wait(timeout=120)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"FFmpeg finalize error for {self.output_path}: {e}")
+            self.proc.kill()
+            return False
+        return (
+            self.proc.returncode == 0
+            and self.output_path.exists()
+            and self.output_path.stat().st_size > 0
+        )
+
+
+def _team_bgr(team: int | None, teams_state: dict[int, Any]) -> tuple[int, int, int]:
+    hex_color = (teams_state.get(team) or {}).get("color_hex") if team else None
+    return hex_to_bgr(hex_color, default=TEAM_FALLBACK_BGR.get(team, (200, 200, 200)))
+
+
+def draw_minimap(
+    frame: np.ndarray,
+    analytics_state: dict[str, Any] | None,
+    pitch_length: float,
+    pitch_width: float,
+    teams_state: dict[int, Any],
+) -> None:
+    """Top-down 2D pitch (homography view) with players and the ball, bottom-centre."""
+    if not analytics_state:
+        return
+    from app.services.pitch_homography import pitch_line_segments
+
+    h, w = frame.shape[:2]
+    map_w = max(160, min(int(w * 0.24), int(h * 0.42 * pitch_length / pitch_width)))
+    map_h = int(map_w * pitch_width / pitch_length)
+    pad = max(6, map_w // 30)
+    x0 = w // 2 - (map_w + 2 * pad) // 2
+    y0 = h - map_h - 2 * pad - 8
+    overlay = frame.copy()
+    cv2.rectangle(
+        overlay,
+        (x0, y0),
+        (x0 + map_w + 2 * pad, y0 + map_h + 2 * pad),
+        (40, 95, 30),
+        -1,
+    )
+    cv2.addWeighted(overlay, 0.78, frame, 0.22, 0, frame)
+    sx, sy = map_w / pitch_length, map_h / pitch_width
+    ox, oy = x0 + pad, y0 + pad
+
+    def to_px(x: float, y: float) -> tuple[int, int]:
+        return int(ox + x * sx), int(oy + y * sy)
+
+    for seg in pitch_line_segments(pitch_length, pitch_width, step=2.0):
+        pts = np.array([to_px(x, y) for x, y in seg], dtype=np.int32)
+        cv2.polylines(frame, [pts], False, (235, 235, 235), 1, cv2.LINE_AA)
+
+    r = max(3, map_w // 90)
+    for p in analytics_state.get("players", []):
+        c = _team_bgr(p.get("team"), teams_state)
+        cx, cy = to_px(p["x"], p["y"])
+        cv2.circle(frame, (cx, cy), r, c, -1, cv2.LINE_AA)
+        cv2.circle(
+            frame,
+            (cx, cy),
+            r,
+            (255, 255, 255) if p.get("has_ball") else (20, 20, 20),
+            1,
+            cv2.LINE_AA,
+        )
+        if p.get("has_ball"):
+            cv2.circle(frame, (cx, cy), r + 3, CARRIER_GOLD, 2, cv2.LINE_AA)
+    ball = analytics_state.get("ball")
+    if ball:
+        bx, by = to_px(ball[0], ball[1])
+        color = (
+            (255, 255, 255) if analytics_state.get("ball_detected") else (160, 160, 160)
+        )
+        cv2.circle(frame, (bx, by), max(2, r - 1), color, -1, cv2.LINE_AA)
+        cv2.circle(frame, (bx, by), max(2, r - 1), (0, 0, 0), 1, cv2.LINE_AA)
+
+
+def draw_scoreboard(
+    frame: np.ndarray,
+    analytics_state: dict[str, Any] | None,
+    teams_state: dict[int, Any],
+    top_offset: int,
+) -> None:
+    """Score + possession % + passes under the possession strip."""
+    if not analytics_state:
+        return
+    _h, w = frame.shape[:2]
+    score = analytics_state.get("score", {})
+    pct = analytics_state.get("possession_percent", {})
+    passes = analytics_state.get("passes", {})
+    text = (
+        f"T1 {score.get('team_1', 0)} - {score.get('team_2', 0)} T2   |   "
+        f"POSS {pct.get('team_1', 0):.0f}% / {pct.get('team_2', 0):.0f}%   |   "
+        f"PASSES {passes.get('team_1', 0)} / {passes.get('team_2', 0)}"
+    )
+    scale = max(0.45, w / 2400.0)
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)
+    x1, y1 = w // 2 - tw // 2 - 12, top_offset + 22
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x1 + tw + 24, y1 + th + 14), (15, 15, 15), -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+    cv2.rectangle(
+        frame, (x1, y1), (x1 + 8, y1 + th + 14), _team_bgr(1, teams_state), -1
+    )
+    cv2.rectangle(
+        frame,
+        (x1 + tw + 16, y1),
+        (x1 + tw + 24, y1 + th + 14),
+        _team_bgr(2, teams_state),
+        -1,
+    )
+    _put(frame, text, (x1 + 12, y1 + th + 7), scale, (255, 255, 255))
+
+
+def draw_event_banner(
+    frame: np.ndarray, event: dict[str, Any], progress: float
+) -> None:
+    """Analytics event banner (goal / pass / interception / tackle / out)."""
+    title, color = EVENT_BANNER_STYLE.get(event.get("type"), ("EVENT", (90, 90, 90)))
+    _draw_banner_titled(frame, title, event, progress, color)
+
+
+def _draw_banner_titled(
+    frame: np.ndarray,
+    title: str,
+    event: dict[str, Any],
+    progress: float,
+    color: tuple[int, int, int],
+) -> None:
+    h, w = frame.shape[:2]
+    sub = str(event.get("description", ""))
+    appear = (
+        progress / 0.15
+        if progress < 0.15
+        else (max(0.0, (1 - progress) / 0.25) if progress > 0.75 else 1.0)
+    )
+    pulse = 0.5 + 0.5 * math.sin(progress * math.pi * 6)
+    scale = max(0.6, w / 1100.0) * (0.85 + 0.15 * appear)
+    thick = max(2, round(scale * 2))
+    (tw, th), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_DUPLEX, scale, thick)
+    sub_scale = scale * 0.45
+    (sw, sh), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, sub_scale, 1)
+    pad = int(14 * scale)
+    box_w, box_h = min(w - 4, max(tw, sw) + pad * 2), th + sh + pad * 3
+    cx, cy = w // 2, int(h * 0.30 - (1.0 - appear) * h * 0.06)
+    x1, y1 = max(2, cx - box_w // 2), max(2, cy - box_h // 2)
+    x2, y2 = min(w - 2, x1 + box_w), min(h - 2, y1 + box_h)
+    alpha = 0.82 * appear
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+    border = tuple(int(c + (255 - c) * pulse * 0.6) for c in color)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), border, thick, cv2.LINE_AA)
+    if appear > 0.05:
+        _put(
+            frame,
+            title,
+            (cx - tw // 2, y1 + pad + th),
+            scale,
+            (255, 255, 255),
+            thick,
+            cv2.FONT_HERSHEY_DUPLEX,
+        )
+        _put(
+            frame,
+            sub,
+            (cx - sw // 2, y1 + pad * 2 + th + sh),
+            sub_scale,
+            (255, 255, 255),
+        )
+
+
+def filter_off_pitch(
+    detections: list[dict[str, Any]],
+    mapper: Any,
+    width: int,
+    height: int,
+    margin_m: float = 4.0,
+) -> list[dict[str, Any]]:
+    """Drop players/balls whose ground point maps far outside the pitch (bench, crowd)."""
+    keep_classes = ("player", "player with ball", "football")
+    targets = [d for d in detections if str(d.get("class", "")).lower() in keep_classes]
+    if not targets:
+        return detections
+    pts = np.array(
+        [
+            ((d["x"] + d["w"] / 2) / 100.0 * width, (d["y"] + d["h"]) / 100.0 * height)
+            for d in targets
+        ]
+    )
+    pitch = mapper.image_to_pitch(pts)
+    drop = {
+        id(d)
+        for d, xy in zip(targets, pitch, strict=False)
+        if not (np.all(np.isfinite(xy)) and mapper.is_on_pitch(xy, margin_m))
+    }
+    return [d for d in detections if id(d) not in drop]
+
+
 def chunk_possession(
     tracker: TeamPossessionTracker, first_event_number: int
 ) -> dict[str, Any]:
@@ -453,6 +730,33 @@ def chunk_possession(
     }
 
 
+def _write_json(path: Path, data: Any) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, default=_json_default), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _json_default(o: Any) -> Any:
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
+
+
+def _log_urls(job_id: str) -> dict[str, str]:
+    base = f"/api/videos/jobs/{job_id}"
+    return {
+        "players_csv": f"{base}/players_log.csv",
+        "ball_csv": f"{base}/ball_log.csv",
+        "events_json": f"{base}/events.json",
+        "match_stats_json": f"{base}/match_stats.json",
+        "heatmaps_json": f"{base}/heatmaps.json",
+    }
+
+
 def run_chunked_annotation_worker(
     job_id: str,
     video_source_path: Path,
@@ -464,13 +768,23 @@ def run_chunked_annotation_worker(
     parse_detections_fn: Any,
     model_obj: Any,
     infer_fps: float = 15.0,
+    detect_fn: Any = None,
+    pitch_mapper: Any = None,
+    max_duration_sec: float | None = None,
 ) -> None:
     """Worker function executing in a background thread to annotate 5s chunks progressively.
 
     Inference runs every ``round(fps / infer_fps)`` frames (e.g. 15 fps -> 2-frame stride
     on 30 fps video) so fast passes and turnovers are caught by the possession tracker.
+
+    With a ``pitch_mapper`` (landmark homography) the worker also projects players and
+    the ball onto the pitch, runs ``MatchAnalytics`` (possession, passes, goals, out of
+    play), draws a 2D minimap and writes players/ball CSV logs plus events/stats JSON.
     """
+    from app.services.match_analytics import MatchAnalytics
+
     logger.info(f"Starting chunked annotation job {job_id} for {video_source_path}")
+    analytics: MatchAnalytics | None = None
 
     try:
         cap = cv2.VideoCapture(str(video_source_path))
@@ -481,7 +795,10 @@ def run_chunked_annotation_worker(
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1280)
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
+        if max_duration_sec and max_duration_sec > 0 and total_frames > 0:
+            total_frames = min(total_frames, round(max_duration_sec * fps))
         duration_sec = total_frames / fps if fps > 0 else 0.0
+        out_w, out_h = output_size(width, height)
 
         chunk_frames_target = max(1, round(fps * chunk_duration_sec))
         total_chunks = (
@@ -490,14 +807,24 @@ def run_chunked_annotation_worker(
             else 1
         )
 
+        mapper = (
+            pitch_mapper.scaled_to(width, height) if pitch_mapper is not None else None
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if mapper is not None:
+            analytics = MatchAnalytics(mapper, log_dir=output_dir)
+
         with JOBS_LOCK:
             if job_id in JOBS:
                 JOBS[job_id]["total_chunks"] = total_chunks
                 JOBS[job_id]["duration_sec"] = round(duration_sec, 2)
                 JOBS[job_id]["fps"] = round(fps, 1)
                 JOBS[job_id]["resolution"] = f"{width}x{height}"
+                JOBS[job_id]["output_resolution"] = f"{out_w}x{out_h}"
+                JOBS[job_id]["calibrated"] = mapper is not None
+                if mapper is not None:
+                    JOBS[job_id]["logs"] = _log_urls(job_id)
 
-        output_dir.mkdir(parents=True, exist_ok=True)
         chunk_files: list[Path] = []
         frame_idx = 0
         chunk_idx = 0
@@ -507,7 +834,9 @@ def run_chunked_annotation_worker(
         min_conf = min([confidence_threshold, *class_confidences.values()])
         tracker = TeamPossessionTracker()
         latest_state: dict[str, Any] | None = None
+        analytics_state: dict[str, Any] | None = None
         banner_event: dict[str, Any] | None = None
+        banner_is_analytics = False
         banner_start_frame = 0
         banner_frames = max(1, round(fps * BANNER_DURATION_SEC))
 
@@ -516,8 +845,18 @@ def run_chunked_annotation_worker(
                 JOBS[job_id]["infer_fps"] = round(effective_infer_fps, 2)
                 JOBS[job_id]["infer_interval_frames"] = infer_interval
 
-        while True:
-            current_chunk_frames: list[np.ndarray] = []
+        def run_detection(frame: np.ndarray) -> dict[str, Any]:
+            if detect_fn is not None:
+                return detect_fn(frame)
+            results = model_obj(frame, imgsz=480, conf=min_conf, verbose=False)
+            return parse_detections_fn(
+                results,
+                conf_threshold=confidence_threshold,
+                class_confidences=class_confidences,
+            )
+
+        reached_limit = False
+        while not reached_limit:
             chunk_class_counts: dict[str, int] = {
                 "player": 0,
                 "football": 0,
@@ -526,30 +865,36 @@ def run_chunked_annotation_worker(
             }
             chunk_total_detections = 0
             chunk_start_sec = frame_idx / fps
+            chunk_output_file = output_dir / f"chunk_{chunk_idx}.mp4"
+            encoder: StreamingChunkEncoder | None = None
 
-            # Read frames for this chunk
             frames_in_this_chunk = 0
-            latest_parsed = {"detections": [], "class_counts": {}}
+            latest_parsed: dict[str, Any] = {"detections": [], "class_counts": {}}
             chunk_event_start = tracker.event_counter
+            chunk_match_event_start = analytics.event_counter if analytics else 0
 
             while frames_in_this_chunk < chunk_frames_target:
+                if total_frames > 0 and frame_idx >= total_frames:
+                    reached_limit = True
+                    break
                 ret, frame = cap.read()
                 if not ret:
+                    reached_limit = True
                     break
 
-                # YOLO model inference on sampled intervals
                 if (frames_in_this_chunk % infer_interval == 0) and (
-                    model_obj is not None
+                    model_obj is not None or detect_fn is not None
                 ):
+                    timestamp = round(frame_idx / fps, 3)
                     try:
-                        results = model_obj(
-                            frame, imgsz=480, conf=min_conf, verbose=False
-                        )
-                        latest_parsed = parse_detections_fn(
-                            results,
-                            conf_threshold=confidence_threshold,
-                            class_confidences=class_confidences,
-                        )
+                        latest_parsed = run_detection(frame)
+                        if mapper is not None:
+                            latest_parsed["detections"] = filter_off_pitch(
+                                latest_parsed.get("detections", []),
+                                mapper,
+                                width,
+                                height,
+                            )
                     except Exception as model_err:  # noqa: BLE001
                         logger.warning(f"Model inference exception: {model_err}")
                         latest_parsed = {"detections": [], "class_counts": {}}
@@ -558,13 +903,42 @@ def run_chunked_annotation_worker(
                         latest_state = tracker.process_frame(
                             frame,
                             latest_parsed.get("detections", []),
-                            timestamp=round(frame_idx / fps, 3),
+                            timestamp=timestamp,
                         )
-                        if latest_state.get("event"):
+                        if analytics is None and latest_state.get("event"):
                             banner_event = latest_state["event"]
+                            banner_is_analytics = False
                             banner_start_frame = frame_idx
                     except Exception as track_err:  # noqa: BLE001
                         logger.warning(f"Possession tracking exception: {track_err}")
+
+                    if analytics is not None:
+                        try:
+                            analytics_state = analytics.process(
+                                latest_parsed.get("detections", []),
+                                timestamp=timestamp,
+                                frame_index=frame_idx,
+                                image_width=width,
+                                image_height=height,
+                            )
+                            evts = analytics_state.get("events") or []
+                            if evts:
+                                # Goals take priority over other banners.
+                                evts = sorted(
+                                    evts, key=lambda e: e.get("type") != "goal"
+                                )
+                                banner_event = evts[0]
+                                banner_is_analytics = True
+                                banner_start_frame = frame_idx
+                            # Carrier highlight follows the analytics carrier.
+                            carrier_id = (analytics_state.get("carrier") or {}).get(
+                                "track_id"
+                            )
+                            for det in latest_parsed.get("detections", []):
+                                if det.get("track_id") is not None:
+                                    det["has_ball"] = det.get("track_id") == carrier_id
+                        except Exception as an_err:  # noqa: BLE001
+                            logger.warning(f"Match analytics exception: {an_err}")
 
                     counts = latest_parsed.get("class_counts", {})
                     for k, v in counts.items():
@@ -574,7 +948,6 @@ def run_chunked_annotation_worker(
                 detections = latest_parsed.get("detections", [])
                 counts = latest_parsed.get("class_counts", {})
 
-                # Draw annotations onto the frame
                 if burn_boxes:
                     for det in detections:
                         draw_detection_box(frame, det)
@@ -587,35 +960,82 @@ def run_chunked_annotation_worker(
                         end_sec=chunk_start_sec + (frames_in_this_chunk / fps),
                         counts=counts,
                     )
-                    draw_possession_hud(frame, latest_state, top_offset=header_h)
+                    hud_state = latest_state
+                    if analytics_state and latest_state:
+                        # Show pitch-based possession/passes in the team strip.
+                        hud_state = dict(latest_state)
+                        hud_state["possession_percent"] = analytics_state[
+                            "possession_percent"
+                        ]
+                        hud_state["teams"] = [
+                            {
+                                **t,
+                                "passes": analytics.passes_completed.get(
+                                    t["team_id"], 0
+                                ),
+                                "losses": analytics.turnovers.get(t["team_id"], 0),
+                            }
+                            for t in latest_state.get("teams", [])
+                        ]
+                        hud_state["carrier"] = None
+                        hud_state["status"] = (
+                            "holding"
+                            if analytics_state.get("carrier")
+                            else "in_transit"
+                        )
+                    draw_possession_hud(frame, hud_state, top_offset=header_h)
+
+                    teams_state = {
+                        t["team_id"]: t for t in (latest_state or {}).get("teams", [])
+                    }
+                    if analytics is not None:
+                        strip_h = max(26, int(height * 0.05))
+                        draw_scoreboard(
+                            frame, analytics_state, teams_state, header_h + strip_h
+                        )
+                        draw_minimap(
+                            frame,
+                            analytics_state,
+                            mapper.pitch_length,
+                            mapper.pitch_width,
+                            teams_state,
+                        )
 
                     if banner_event is not None:
                         elapsed = frame_idx - banner_start_frame
                         if elapsed < banner_frames:
-                            draw_possession_banner(
-                                frame, banner_event, elapsed / banner_frames
-                            )
+                            if banner_is_analytics:
+                                draw_event_banner(
+                                    frame, banner_event, elapsed / banner_frames
+                                )
+                            else:
+                                draw_possession_banner(
+                                    frame, banner_event, elapsed / banner_frames
+                                )
                         else:
                             banner_event = None
 
-                current_chunk_frames.append(frame)
+                if encoder is None:
+                    encoder = StreamingChunkEncoder(
+                        chunk_output_file, fps, out_w, out_h
+                    )
+                encoder.write(frame)
                 frame_idx += 1
                 frames_in_this_chunk += 1
 
-            if not current_chunk_frames:
+            if encoder is None:
                 break
 
+            success = encoder.close()
             chunk_end_sec = frame_idx / fps
-            chunk_output_file = output_dir / f"chunk_{chunk_idx}.mp4"
 
-            # Encode chunk via FFmpeg
-            success = encode_chunk_ffmpeg(
-                current_chunk_frames,
-                chunk_output_file,
-                fps=fps,
-                width=width,
-                height=height,
-            )
+            match_stats = None
+            if analytics is not None:
+                analytics.flush()
+                match_stats = analytics.summary()
+                _write_json(output_dir / "match_stats.json", match_stats)
+                _write_json(output_dir / "events.json", analytics.events)
+                _write_json(output_dir / "heatmaps.json", analytics.heatmaps_payload())
 
             if success:
                 chunk_files.append(chunk_output_file)
@@ -628,14 +1048,22 @@ def run_chunked_annotation_worker(
                     "relative_url": f"/api/videos/jobs/{job_id}/chunk_{chunk_idx}.mp4",
                     "counts": chunk_class_counts,
                     "detections_count": chunk_total_detections,
-                    "frames": len(current_chunk_frames),
+                    "frames": encoder.frames,
                     "possession": chunk_possession(tracker, chunk_event_start),
                 }
+                if analytics is not None:
+                    chunk_info["match_events"] = [
+                        e
+                        for e in analytics.events
+                        if int(str(e["id"]).split("-")[-1]) > chunk_match_event_start
+                    ]
                 possession_summary = tracker.get_summary()
 
                 with JOBS_LOCK:
                     if job_id in JOBS:
                         JOBS[job_id]["possession_summary"] = possession_summary
+                        if match_stats is not None:
+                            JOBS[job_id]["match_stats"] = match_stats
                         JOBS[job_id]["chunks"].append(chunk_info)
                         JOBS[job_id]["completed_chunks"] = len(JOBS[job_id]["chunks"])
                         JOBS[job_id]["progress_percent"] = round(
@@ -685,6 +1113,9 @@ def run_chunked_annotation_worker(
             if job_id in JOBS:
                 JOBS[job_id]["status"] = "failed"
                 JOBS[job_id]["error"] = str(e)
+    finally:
+        if analytics is not None:
+            analytics.close()
 
 
 def create_annotation_job(
@@ -697,6 +1128,9 @@ def create_annotation_job(
     parse_detections_fn: Any = None,
     model_obj: Any = None,
     infer_fps: float = 15.0,
+    detect_fn: Any = None,
+    pitch_mapper: Any = None,
+    max_duration_sec: float | None = None,
 ) -> dict[str, Any]:
     """Initializes and launches a background chunked video annotation job."""
     job_id = f"job_{uuid.uuid4().hex[:10]}"
@@ -724,6 +1158,9 @@ def create_annotation_job(
         "infer_fps": infer_fps,
         "infer_interval_frames": None,
         "possession_summary": None,
+        "calibrated": pitch_mapper is not None,
+        "match_stats": None,
+        "logs": None,
         "chunks": [],
         "full_video_url": None,
         "full_relative_url": None,
@@ -747,6 +1184,9 @@ def create_annotation_job(
             "parse_detections_fn": parse_detections_fn,
             "model_obj": model_obj,
             "infer_fps": infer_fps,
+            "detect_fn": detect_fn,
+            "pitch_mapper": pitch_mapper,
+            "max_duration_sec": max_duration_sec,
         },
         daemon=True,
     )
