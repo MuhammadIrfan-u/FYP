@@ -16,6 +16,7 @@ import {
   Sparkles,
   Clapperboard,
   ArrowRight,
+  Share2,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
@@ -38,6 +39,8 @@ export const UploadView: React.FC = () => {
     uploadProgress,
     refreshSessions,
     isLoadingSessions,
+    setPassesSessionId,
+    setPassesAutoStart,
   } = useFootball();
 
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -150,6 +153,13 @@ export const UploadView: React.FC = () => {
     setDeletingId(session.id);
     await deleteSession(session.id);
     setDeletingId(null);
+  };
+
+  // Pass detection lives on its own Passes tab; open it with this session selected.
+  const handleDetectPasses = (video: MatchVideo) => {
+    setPassesSessionId(video.id);
+    setPassesAutoStart(true);
+    setActivePage('passes');
   };
 
   const handleOpenAnnotateModal = (video: MatchVideo) => {
@@ -443,7 +453,7 @@ export const UploadView: React.FC = () => {
                   </div>
 
                   {/* Status & Actions */}
-                  <div className="flex items-center justify-between md:justify-end gap-3 w-full md:w-auto">
+                  <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 w-full md:w-auto">
                     {/* Status Badge */}
                     <div className="flex items-center gap-2">
                       <StatusBadge status={vid.status} />
@@ -467,6 +477,16 @@ export const UploadView: React.FC = () => {
                     >
                       <Film className="w-3.5 h-3.5 fill-white" />
                       <span>5s Stream & Annotate</span>
+                    </button>
+
+                    {/* Opens the Passes tab and starts pass detection for this session */}
+                    <button
+                      onClick={() => handleDetectPasses(vid)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-2xs cursor-pointer"
+                      title="Open the Passes tab and count passes between players across 5-second chunks"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Detect Passes</span>
                     </button>
 
                     {/* Delete Session Button */}

@@ -736,6 +736,7 @@ def start_background_annotation(
     homography: str | None = Form(None),
     require_calibration: bool = Form(False),
     max_duration: float | None = Form(None),
+    passes_only: bool = Form(False),
 ):
     """
     Launches a background video inference and annotation job that segments big videos
@@ -896,6 +897,7 @@ def start_background_annotation(
         detect_fn=_make_detect_fn(confidence_threshold, parsed_class_confidences),
         pitch_mapper=pitch_mapper,
         max_duration_sec=max_duration,
+        passes_only=passes_only,
     )
 
     return {
@@ -906,6 +908,7 @@ def start_background_annotation(
         "class_confidences": job["class_confidences"],
         "infer_fps": job["infer_fps"],
         "calibrated": pitch_mapper is not None,
+        "passes_only": passes_only,
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }
 

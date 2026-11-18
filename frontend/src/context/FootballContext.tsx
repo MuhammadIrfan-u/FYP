@@ -93,6 +93,14 @@ interface FootballContextType {
     customClassConfs?: Record<string, number>,
     options?: BackgroundSessionOptions
   ) => Promise<BackgroundAnnotationJob | null>;
+  /** Session selected on the Passes page (set by "Detect Passes" on Upload). */
+  passesSessionId: string | null;
+  setPassesSessionId: (id: string | null) => void;
+  /** True right after "Detect Passes" is clicked: the Passes page starts a job if none exists. */
+  passesAutoStart: boolean;
+  setPassesAutoStart: (v: boolean) => void;
+  /** Starts a 5s chunked, passes-only job (no team classification). Throws on error. */
+  startPassDetectionJob: (video: MatchVideo) => Promise<BackgroundAnnotationJob>;
   activeVideoTab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw';
   setActiveVideoTab: (tab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw') => void;
   toastMessage: string | null;
@@ -207,6 +215,8 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
   const [activeBackgroundJob, setActiveBackgroundJob] = useState<BackgroundAnnotationJob | null>(null);
   const [analysisMode, setAnalysisMode] = useState<'live' | 'chunked'>('chunked');
+  const [passesSessionId, setPassesSessionId] = useState<string | null>(null);
+  const [passesAutoStart, setPassesAutoStart] = useState<boolean>(false);
 
   const updateClassConfidence = (cls: string, val: number) => {
     setClassConfidences((prev) => ({
@@ -626,6 +636,38 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return null;
   };
 
+  const startPassDetectionJob = async (video: MatchVideo): Promise<BackgroundAnnotationJob> => {
+    let videoUrl: string | undefined;
+    if (video.savedFilename) {
+      videoUrl = `http://127.0.0.1:8000/api/videos/${video.savedFilename}`;
+    } else if (video.videoPath) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET_NAME)
+          .createSignedUrl(video.videoPath, 3600);
+        if (!error && data?.signedUrl) videoUrl = data.signedUrl;
+      } catch (err) {
+        console.warn('Signed URL request exception:', err);
+      }
+    }
+    if (!videoUrl && video.videoUrl && !video.videoUrl.startsWith('blob:')) {
+      videoUrl = video.videoUrl;
+    }
+
+    const res = await startBackgroundAnnotation({
+      videoFilename: video.savedFilename || video.filename,
+      videoUrl,
+      chunkDuration: 5.0,
+      confidenceThreshold,
+      classConfidences,
+      burnBoxes: true,
+      inferFps: 10,
+      requireCalibration: false,
+      passesOnly: true,
+    });
+    return await getBackgroundJobStatus(res.job_id);
+  };
+
   const simulateUpload = (fileName: string, fileSize: string) => {
     const newId = `vid-${Date.now()}`;
     const newVideo: MatchVideo = {
@@ -781,6 +823,11 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         analysisMode,
         setAnalysisMode,
         startBackgroundSession,
+        passesSessionId,
+        setPassesSessionId,
+        passesAutoStart,
+        setPassesAutoStart,
+        startPassDetectionJob,
         activeVideoTab,
         setActiveVideoTab,
         toastMessage,

@@ -12,6 +12,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from app.services.pass_detection import PassDetector
 from app.services.team_possession import TeamPossessionTracker, hex_to_bgr
 
 try:
@@ -685,6 +686,113 @@ def _draw_banner_titled(
         )
 
 
+PASS_LINE_BGR = (255, 200, 40)  # bright cyan-blue, distinct from class box colours
+
+
+def _dashed_line(frame, p1, p2, color, thick, dash=14, gap=9) -> None:
+    x1, y1 = p1
+    x2, y2 = p2
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length < 1:
+        return
+    ux, uy = (x2 - x1) / length, (y2 - y1) / length
+    pos = 0.0
+    while pos < length:
+        end = min(pos + dash, length)
+        a = (int(x1 + ux * pos), int(y1 + uy * pos))
+        b = (int(x1 + ux * end), int(y1 + uy * end))
+        cv2.line(frame, a, b, color, thick, cv2.LINE_AA)
+        pos = end + gap
+
+
+def draw_pass_lines(
+    frame: np.ndarray,
+    in_flight: tuple[tuple[float, float], tuple[float, float]] | None,
+    last_pass: dict[str, Any] | None,
+    pass_number: int,
+    progress: float,
+) -> None:
+    """2D pass overlay: dashed passer->ball line while the ball travels, then a
+    solid passer->receiver arrow labelled ``PASS #n`` that fades out
+    (``progress`` 0..1 through its display window)."""
+    h, w = frame.shape[:2]
+    thick = max(2, round(min(w, h) / 360))
+
+    if in_flight is not None:
+        (px, py), (bx, by) = in_flight
+        _dashed_line(frame, (px, py), (bx, by), PASS_LINE_BGR, thick)
+        cv2.circle(
+            frame, (int(px), int(py)), thick * 3, PASS_LINE_BGR, thick, cv2.LINE_AA
+        )
+
+    if last_pass is None or progress >= 1.0:
+        return
+    fx, fy = last_pass["from_pos"]
+    tx, ty = last_pass["to_pos"]
+    overlay = frame.copy()
+    p1, p2 = (int(fx), int(fy)), (int(tx), int(ty))
+    cv2.arrowedLine(
+        overlay, p1, p2, PASS_LINE_BGR, thick + 1, cv2.LINE_AA, tipLength=0.08
+    )
+    cv2.circle(overlay, p1, thick * 3, PASS_LINE_BGR, -1, cv2.LINE_AA)
+    cv2.circle(overlay, p2, thick * 3, PASS_LINE_BGR, -1, cv2.LINE_AA)
+    label = f"PASS #{pass_number}"
+    scale = max(0.45, min(w, h) / 900)
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+    mx, my = (p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2 - thick * 4
+    mx = max(4, min(w - tw - 8, mx - tw // 2))
+    my = max(th + 8, my)
+    cv2.rectangle(
+        overlay, (mx - 4, my - th - 6), (mx + tw + 4, my + 4), (20, 20, 20), -1
+    )
+    cv2.putText(
+        overlay,
+        label,
+        (mx, my),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        PASS_LINE_BGR,
+        2,
+        cv2.LINE_AA,
+    )
+    alpha = 1.0 if progress < 0.6 else max(0.0, 1.0 - (progress - 0.6) / 0.4)
+    cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, dst=frame)
+
+
+def add_pass_2d(event: dict[str, Any], width: int, height: int, mapper: Any) -> None:
+    """Adds 2D coordinates to a pass event: ``from_xy``/``to_xy`` normalised to the
+    frame (0..1) and, with a pitch calibration, ``from_pitch``/``to_pitch`` in metres."""
+    w, h = max(1, width), max(1, height)
+    (fx, fy), (tx, ty) = event["from_pos"], event["to_pos"]
+    event["from_xy"] = [round(fx / w, 4), round(fy / h, 4)]
+    event["to_xy"] = [round(tx / w, 4), round(ty / h, 4)]
+    if mapper is not None:
+        pts = mapper.image_to_pitch([[fx, fy], [tx, ty]])
+        event["from_pitch"] = [round(float(v), 2) for v in pts[0]]
+        event["to_pitch"] = [round(float(v), 2) for v in pts[1]]
+
+
+def draw_passes_hud(frame: np.ndarray, total_passes: int) -> None:
+    """Small top-right badge with the running pass count (Passes tab videos)."""
+    h, w = frame.shape[:2]
+    scale = max(0.5, min(w, h) / 800)
+    label = f"PASSES: {total_passes}"
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+    top = max(30, int(h * 0.055)) + 8
+    x2, x1 = w - 10, w - 10 - tw - 16
+    cv2.rectangle(frame, (x1, top), (x2, top + th + 14), (20, 20, 20), -1)
+    cv2.putText(
+        frame,
+        label,
+        (x1 + 8, top + th + 6),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        PASS_LINE_BGR,
+        2,
+        cv2.LINE_AA,
+    )
+
+
 def filter_off_pitch(
     detections: list[dict[str, Any]],
     mapper: Any,
@@ -771,8 +879,12 @@ def run_chunked_annotation_worker(
     detect_fn: Any = None,
     pitch_mapper: Any = None,
     max_duration_sec: float | None = None,
+    passes_only: bool = False,
 ) -> None:
     """Worker function executing in a background thread to annotate 5s chunks progressively.
+
+    ``passes_only`` (Passes tab): no team / jersey-colour classification, no possession
+    or match analytics. Only detection boxes, pass counting and 2D pass lines.
 
     Inference runs every ``round(fps / infer_fps)`` frames (e.g. 15 fps -> 2-frame stride
     on 30 fps video) so fast passes and turnovers are caught by the possession tracker.
@@ -811,7 +923,7 @@ def run_chunked_annotation_worker(
             pitch_mapper.scaled_to(width, height) if pitch_mapper is not None else None
         )
         output_dir.mkdir(parents=True, exist_ok=True)
-        if mapper is not None:
+        if mapper is not None and not passes_only:
             analytics = MatchAnalytics(mapper, log_dir=output_dir)
 
         with JOBS_LOCK:
@@ -822,7 +934,7 @@ def run_chunked_annotation_worker(
                 JOBS[job_id]["resolution"] = f"{width}x{height}"
                 JOBS[job_id]["output_resolution"] = f"{out_w}x{out_h}"
                 JOBS[job_id]["calibrated"] = mapper is not None
-                if mapper is not None:
+                if analytics is not None:
                     JOBS[job_id]["logs"] = _log_urls(job_id)
 
         chunk_files: list[Path] = []
@@ -832,7 +944,13 @@ def run_chunked_annotation_worker(
         effective_infer_fps = max(0.5, min(float(infer_fps or 15.0), fps))
         infer_interval = max(1, round(fps / effective_infer_fps))
         min_conf = min([confidence_threshold, *class_confidences.values()])
-        tracker = TeamPossessionTracker()
+        tracker = None if passes_only else TeamPossessionTracker()
+        # Team-agnostic pass counter, shared across chunks so boundary passes count once.
+        pass_detector = PassDetector(sample_fps=fps / infer_interval)
+        total_passes = 0
+        last_pass_event: dict[str, Any] | None = None
+        last_pass_frame = 0
+        pass_line_frames = max(1, round(fps * BANNER_DURATION_SEC))
         latest_state: dict[str, Any] | None = None
         analytics_state: dict[str, Any] | None = None
         banner_event: dict[str, Any] | None = None
@@ -864,13 +982,14 @@ def run_chunked_annotation_worker(
                 "player with ball": 0,
             }
             chunk_total_detections = 0
+            chunk_pass_events: list[dict[str, Any]] = []
             chunk_start_sec = frame_idx / fps
             chunk_output_file = output_dir / f"chunk_{chunk_idx}.mp4"
             encoder: StreamingChunkEncoder | None = None
 
             frames_in_this_chunk = 0
             latest_parsed: dict[str, Any] = {"detections": [], "class_counts": {}}
-            chunk_event_start = tracker.event_counter
+            chunk_event_start = tracker.event_counter if tracker else 0
             chunk_match_event_start = analytics.event_counter if analytics else 0
 
             while frames_in_this_chunk < chunk_frames_target:
@@ -900,17 +1019,35 @@ def run_chunked_annotation_worker(
                         latest_parsed = {"detections": [], "class_counts": {}}
 
                     try:
-                        latest_state = tracker.process_frame(
-                            frame,
+                        pass_event = pass_detector.process(
                             latest_parsed.get("detections", []),
                             timestamp=timestamp,
+                            frame_w=width,
+                            frame_h=height,
                         )
-                        if analytics is None and latest_state.get("event"):
-                            banner_event = latest_state["event"]
-                            banner_is_analytics = False
-                            banner_start_frame = frame_idx
-                    except Exception as track_err:  # noqa: BLE001
-                        logger.warning(f"Possession tracking exception: {track_err}")
+                        if pass_event is not None:
+                            add_pass_2d(pass_event, width, height, mapper)
+                            chunk_pass_events.append(pass_event)
+                            last_pass_event = pass_event
+                            last_pass_frame = frame_idx
+                    except Exception as pass_err:  # noqa: BLE001
+                        logger.warning(f"Pass detection exception: {pass_err}")
+
+                    if not passes_only:
+                        try:
+                            latest_state = tracker.process_frame(
+                                frame,
+                                latest_parsed.get("detections", []),
+                                timestamp=timestamp,
+                            )
+                            if analytics is None and latest_state.get("event"):
+                                banner_event = latest_state["event"]
+                                banner_is_analytics = False
+                                banner_start_frame = frame_idx
+                        except Exception as track_err:  # noqa: BLE001
+                            logger.warning(
+                                f"Possession tracking exception: {track_err}"
+                            )
 
                     if analytics is not None:
                         try:
@@ -952,6 +1089,20 @@ def run_chunked_annotation_worker(
                     for det in detections:
                         draw_detection_box(frame, det)
 
+                    if passes_only:
+                        draw_passes_hud(frame, total_passes + len(chunk_pass_events))
+                        try:
+                            draw_pass_lines(
+                                frame,
+                                pass_detector.in_flight_line(),
+                                last_pass_event,
+                                pass_number=total_passes + len(chunk_pass_events),
+                                progress=(frame_idx - last_pass_frame)
+                                / pass_line_frames,
+                            )
+                        except Exception as draw_err:  # noqa: BLE001
+                            logger.warning(f"Pass line drawing exception: {draw_err}")
+
                     header_h = draw_hud_header(
                         frame,
                         chunk_idx=chunk_idx,
@@ -960,60 +1111,62 @@ def run_chunked_annotation_worker(
                         end_sec=chunk_start_sec + (frames_in_this_chunk / fps),
                         counts=counts,
                     )
-                    hud_state = latest_state
-                    if analytics_state and latest_state:
-                        # Show pitch-based possession/passes in the team strip.
-                        hud_state = dict(latest_state)
-                        hud_state["possession_percent"] = analytics_state[
-                            "possession_percent"
-                        ]
-                        hud_state["teams"] = [
-                            {
-                                **t,
-                                "passes": analytics.passes_completed.get(
-                                    t["team_id"], 0
-                                ),
-                                "losses": analytics.turnovers.get(t["team_id"], 0),
-                            }
-                            for t in latest_state.get("teams", [])
-                        ]
-                        hud_state["carrier"] = None
-                        hud_state["status"] = (
-                            "holding"
-                            if analytics_state.get("carrier")
-                            else "in_transit"
-                        )
-                    draw_possession_hud(frame, hud_state, top_offset=header_h)
+                    if not passes_only:
+                        hud_state = latest_state
+                        if analytics_state and latest_state:
+                            # Show pitch-based possession/passes in the team strip.
+                            hud_state = dict(latest_state)
+                            hud_state["possession_percent"] = analytics_state[
+                                "possession_percent"
+                            ]
+                            hud_state["teams"] = [
+                                {
+                                    **t,
+                                    "passes": analytics.passes_completed.get(
+                                        t["team_id"], 0
+                                    ),
+                                    "losses": analytics.turnovers.get(t["team_id"], 0),
+                                }
+                                for t in latest_state.get("teams", [])
+                            ]
+                            hud_state["carrier"] = None
+                            hud_state["status"] = (
+                                "holding"
+                                if analytics_state.get("carrier")
+                                else "in_transit"
+                            )
+                        draw_possession_hud(frame, hud_state, top_offset=header_h)
 
-                    teams_state = {
-                        t["team_id"]: t for t in (latest_state or {}).get("teams", [])
-                    }
-                    if analytics is not None:
-                        strip_h = max(26, int(height * 0.05))
-                        draw_scoreboard(
-                            frame, analytics_state, teams_state, header_h + strip_h
-                        )
-                        draw_minimap(
-                            frame,
-                            analytics_state,
-                            mapper.pitch_length,
-                            mapper.pitch_width,
-                            teams_state,
-                        )
+                        teams_state = {
+                            t["team_id"]: t
+                            for t in (latest_state or {}).get("teams", [])
+                        }
+                        if analytics is not None:
+                            strip_h = max(26, int(height * 0.05))
+                            draw_scoreboard(
+                                frame, analytics_state, teams_state, header_h + strip_h
+                            )
+                            draw_minimap(
+                                frame,
+                                analytics_state,
+                                mapper.pitch_length,
+                                mapper.pitch_width,
+                                teams_state,
+                            )
 
-                    if banner_event is not None:
-                        elapsed = frame_idx - banner_start_frame
-                        if elapsed < banner_frames:
-                            if banner_is_analytics:
-                                draw_event_banner(
-                                    frame, banner_event, elapsed / banner_frames
-                                )
+                        if banner_event is not None:
+                            elapsed = frame_idx - banner_start_frame
+                            if elapsed < banner_frames:
+                                if banner_is_analytics:
+                                    draw_event_banner(
+                                        frame, banner_event, elapsed / banner_frames
+                                    )
+                                else:
+                                    draw_possession_banner(
+                                        frame, banner_event, elapsed / banner_frames
+                                    )
                             else:
-                                draw_possession_banner(
-                                    frame, banner_event, elapsed / banner_frames
-                                )
-                        else:
-                            banner_event = None
+                                banner_event = None
 
                 if encoder is None:
                     encoder = StreamingChunkEncoder(
@@ -1049,15 +1202,22 @@ def run_chunked_annotation_worker(
                     "counts": chunk_class_counts,
                     "detections_count": chunk_total_detections,
                     "frames": encoder.frames,
-                    "possession": chunk_possession(tracker, chunk_event_start),
+                    "possession": (
+                        chunk_possession(tracker, chunk_event_start)
+                        if tracker
+                        else None
+                    ),
+                    "passes": len(chunk_pass_events),
+                    "pass_events": chunk_pass_events,
                 }
+                total_passes += len(chunk_pass_events)
                 if analytics is not None:
                     chunk_info["match_events"] = [
                         e
                         for e in analytics.events
                         if int(str(e["id"]).split("-")[-1]) > chunk_match_event_start
                     ]
-                possession_summary = tracker.get_summary()
+                possession_summary = tracker.get_summary() if tracker else None
 
                 with JOBS_LOCK:
                     if job_id in JOBS:
@@ -1065,6 +1225,7 @@ def run_chunked_annotation_worker(
                         if match_stats is not None:
                             JOBS[job_id]["match_stats"] = match_stats
                         JOBS[job_id]["chunks"].append(chunk_info)
+                        JOBS[job_id]["total_passes"] = total_passes
                         JOBS[job_id]["completed_chunks"] = len(JOBS[job_id]["chunks"])
                         JOBS[job_id]["progress_percent"] = round(
                             (JOBS[job_id]["completed_chunks"] / max(1, total_chunks))
@@ -1131,6 +1292,7 @@ def create_annotation_job(
     detect_fn: Any = None,
     pitch_mapper: Any = None,
     max_duration_sec: float | None = None,
+    passes_only: bool = False,
 ) -> dict[str, Any]:
     """Initializes and launches a background chunked video annotation job."""
     job_id = f"job_{uuid.uuid4().hex[:10]}"
@@ -1160,6 +1322,8 @@ def create_annotation_job(
         "possession_summary": None,
         "calibrated": pitch_mapper is not None,
         "match_stats": None,
+        "total_passes": 0,
+        "passes_only": passes_only,
         "logs": None,
         "chunks": [],
         "full_video_url": None,
@@ -1187,6 +1351,7 @@ def create_annotation_job(
             "detect_fn": detect_fn,
             "pitch_mapper": pitch_mapper,
             "max_duration_sec": max_duration_sec,
+            "passes_only": passes_only,
         },
         daemon=True,
     )
