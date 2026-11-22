@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+from app import model_config
 from app.main import parse_detections
 from tests.conftest import MockBox, MockYOLOResult
 
@@ -8,12 +9,7 @@ def test_parse_detections_empty_results():
     """Verify parse_detections handles empty results safely."""
     result = parse_detections([], conf_threshold=0.25)
     assert result["detections"] == []
-    assert result["class_counts"] == {
-        "player": 0,
-        "football": 0,
-        "football goal": 0,
-        "player with ball": 0,
-    }
+    assert result["class_counts"] == model_config.empty_class_counts()
 
 
 def test_parse_detections_none_boxes():
@@ -21,12 +17,7 @@ def test_parse_detections_none_boxes():
     mock_res = MockYOLOResult(boxes=None)
     result = parse_detections([mock_res], conf_threshold=0.25)
     assert result["detections"] == []
-    assert result["class_counts"] == {
-        "player": 0,
-        "football": 0,
-        "football goal": 0,
-        "player with ball": 0,
-    }
+    assert result["class_counts"] == model_config.empty_class_counts()
 
 
 def test_parse_detections_empty_boxes():
@@ -34,12 +25,7 @@ def test_parse_detections_empty_boxes():
     mock_res = MockYOLOResult(boxes=[])
     result = parse_detections([mock_res], conf_threshold=0.25)
     assert result["detections"] == []
-    assert result["class_counts"] == {
-        "player": 0,
-        "football": 0,
-        "football goal": 0,
-        "player with ball": 0,
-    }
+    assert result["class_counts"] == model_config.empty_class_counts()
 
 
 def test_parse_detections_confidence_filtering(configured_mock_model):

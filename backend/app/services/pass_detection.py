@@ -20,9 +20,11 @@ from typing import Any
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-PLAYER_CLASSES = {"player", "player with ball"}
-CARRIER_CLASS = "player with ball"
-BALL_CLASS = "football"
+from app import model_config
+
+PLAYER_CLASSES = set(model_config.PLAYER_CLASSES)
+CARRIER_CLASS = model_config.CARRIER_CLASS
+BALL_CLASS = model_config.BALL_CLASS
 
 
 class _PlayerTracker:

@@ -12,6 +12,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from app import model_config
 from app.services.pass_detection import PassDetector
 from app.services.team_possession import TeamPossessionTracker, hex_to_bgr
 
@@ -35,6 +36,10 @@ CLASS_COLORS: dict[str, tuple[int, int, int]] = {
     "football": (0, 215, 255),  # Electric yellow/gold
     "football goal": (34, 126, 255),  # Vibrant orange
     "player with ball": (255, 90, 220),  # Magenta / neon purple
+    # Match officials. Detected so they can be excluded from team clustering,
+    # possession and passes; drawn only so you can see that happening.
+    "referee": (60, 180, 250),  # Sky blue
+    "assistant_referee": (120, 200, 250),  # Pale blue
 }
 DEFAULT_COLOR = (200, 200, 200)
 CARRIER_GOLD = (0, 200, 255)  # BGR gold
@@ -73,7 +78,7 @@ def draw_hud_header(
         f"Players: {counts.get('player', 0)} | "
         f"Ball: {counts.get('football', 0)} | "
         f"Goals: {counts.get('football goal', 0)} | "
-        f"Ball-carrier: {counts.get('player with ball', 0)}"
+        f"Refs: {counts.get('referee', 0) + counts.get('assistant_referee', 0)}"
     )
 
     font_scale = max(0.4, w / 2200.0)
@@ -801,7 +806,7 @@ def filter_off_pitch(
     margin_m: float = 4.0,
 ) -> list[dict[str, Any]]:
     """Drop players/balls whose ground point maps far outside the pitch (bench, crowd)."""
-    keep_classes = ("player", "player with ball", "football")
+    keep_classes = (*model_config.PLAYER_CLASSES, model_config.BALL_CLASS)
     targets = [d for d in detections if str(d.get("class", "")).lower() in keep_classes]
     if not targets:
         return detections
@@ -865,9 +870,29 @@ def _log_urls(job_id: str) -> dict[str, str]:
     }
 
 
+def download_remote_video(url: str, dest: Path) -> Path:
+    """Downloads a remote video (e.g. a Supabase signed URL) to ``dest``.
+
+    This runs in the worker thread, never in a request handler: a session video
+    is tens of megabytes, and holding an HTTP response open for the whole
+    transfer is what made the browser give up with "Failed to fetch".
+    """
+    import urllib.request
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        urllib.request.urlopen(url, timeout=60) as response,
+        open(dest, "wb") as out,
+    ):
+        shutil.copyfileobj(response, out, length=1024 * 1024)
+    if not dest.exists() or dest.stat().st_size == 0:
+        raise RuntimeError("downloaded file is empty")
+    return dest
+
+
 def run_chunked_annotation_worker(
     job_id: str,
-    video_source_path: Path,
+    video_source_path: Path | None,
     output_dir: Path,
     chunk_duration_sec: float,
     confidence_threshold: float,
@@ -880,6 +905,7 @@ def run_chunked_annotation_worker(
     pitch_mapper: Any = None,
     max_duration_sec: float | None = None,
     passes_only: bool = False,
+    remote_video_url: str | None = None,
 ) -> None:
     """Worker function executing in a background thread to annotate 5s chunks progressively.
 
@@ -899,6 +925,29 @@ def run_chunked_annotation_worker(
     analytics: MatchAnalytics | None = None
 
     try:
+        if remote_video_url and (
+            video_source_path is None or not video_source_path.exists()
+        ):
+            # Fetch the session video here rather than in the request handler.
+            with JOBS_LOCK:
+                if job_id in JOBS:
+                    JOBS[job_id]["stage"] = "downloading"
+            logger.info(f"Job {job_id}: downloading session video")
+            try:
+                video_source_path = download_remote_video(
+                    remote_video_url, output_dir / "source.mp4"
+                )
+            except Exception as dl_err:
+                raise RuntimeError(
+                    f"Could not download the session video: {dl_err}"
+                ) from dl_err
+            with JOBS_LOCK:
+                if job_id in JOBS:
+                    JOBS[job_id]["stage"] = "analysing"
+
+        if video_source_path is None:
+            raise RuntimeError("No video source was provided for this job")
+
         cap = cv2.VideoCapture(str(video_source_path))
         if not cap.isOpened():
             raise RuntimeError(f"Could not open input video: {video_source_path}")
@@ -966,7 +1015,9 @@ def run_chunked_annotation_worker(
         def run_detection(frame: np.ndarray) -> dict[str, Any]:
             if detect_fn is not None:
                 return detect_fn(frame)
-            results = model_obj(frame, imgsz=480, conf=min_conf, verbose=False)
+            results = model_obj(
+                frame, imgsz=model_config.INFER_IMGSZ, conf=min_conf, verbose=False
+            )
             return parse_detections_fn(
                 results,
                 conf_threshold=confidence_threshold,
@@ -975,12 +1026,7 @@ def run_chunked_annotation_worker(
 
         reached_limit = False
         while not reached_limit:
-            chunk_class_counts: dict[str, int] = {
-                "player": 0,
-                "football": 0,
-                "football goal": 0,
-                "player with ball": 0,
-            }
+            chunk_class_counts: dict[str, int] = model_config.empty_class_counts()
             chunk_total_detections = 0
             chunk_pass_events: list[dict[str, Any]] = []
             chunk_start_sec = frame_idx / fps
@@ -1280,8 +1326,10 @@ def run_chunked_annotation_worker(
 
 
 def create_annotation_job(
-    video_source_path: Path,
+    video_source_path: Path | None,
     uploads_dir: Path,
+    remote_video_url: str | None = None,
+    substituted_video: bool = False,
     chunk_duration_sec: float = 5.0,
     confidence_threshold: float = 0.25,
     class_confidences: dict[str, float] | None = None,
@@ -1294,17 +1342,19 @@ def create_annotation_job(
     max_duration_sec: float | None = None,
     passes_only: bool = False,
 ) -> dict[str, Any]:
-    """Initializes and launches a background chunked video annotation job."""
+    """Initializes and launches a background chunked video annotation job.
+
+    ``remote_video_url`` is downloaded by the worker when the video is not
+    already on disk, so starting a job never waits on a transfer.
+    ``substituted_video`` records that the requested video was not found and
+    another one was used instead - results would otherwise look valid while
+    describing a different match.
+    """
     job_id = f"job_{uuid.uuid4().hex[:10]}"
     output_dir = uploads_dir / "jobs" / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    class_confs = class_confidences or {
-        "football goal": 0.35,
-        "football": 0.30,
-        "player": 0.25,
-        "player with ball": 0.25,
-    }
+    class_confs = class_confidences or dict(model_config.DEFAULT_CLASS_CONFIDENCES)
 
     job_data: dict[str, Any] = {
         "job_id": job_id,
@@ -1324,6 +1374,11 @@ def create_annotation_job(
         "match_stats": None,
         "total_passes": 0,
         "passes_only": passes_only,
+        # Which video is actually being analysed, and whether it is a stand-in
+        # for one that could not be found.
+        "source_video": video_source_path.name if video_source_path else None,
+        "substituted_video": substituted_video,
+        "stage": "downloading" if remote_video_url else "analysing",
         "logs": None,
         "chunks": [],
         "full_video_url": None,
@@ -1352,6 +1407,7 @@ def create_annotation_job(
             "pitch_mapper": pitch_mapper,
             "max_duration_sec": max_duration_sec,
             "passes_only": passes_only,
+            "remote_video_url": remote_video_url,
         },
         daemon=True,
     )

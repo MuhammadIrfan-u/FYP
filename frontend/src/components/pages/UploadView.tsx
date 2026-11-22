@@ -57,7 +57,8 @@ export const UploadView: React.FC = () => {
     'football goal': 0.35,
     'football': 0.30,
     'player': 0.25,
-    'player with ball': 0.25,
+    'referee': 0.25,
+    'assistant_referee': 0.25,
   });
   const [isStartingStream, setIsStartingStream] = useState<boolean>(false);
   // Step 1: drag-and-drop pitch landmarks (homography) before any analysis starts.
@@ -169,7 +170,8 @@ export const UploadView: React.FC = () => {
       'football goal': classConfidences['football goal'] ?? 0.35,
       'football': classConfidences['football'] ?? 0.30,
       'player': classConfidences['player'] ?? 0.25,
-      'player with ball': classConfidences['player with ball'] ?? 0.25,
+      'referee': classConfidences['referee'] ?? 0.25,
+      'assistant_referee': classConfidences['assistant_referee'] ?? 0.25,
     });
   };
 

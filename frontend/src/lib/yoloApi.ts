@@ -348,6 +348,25 @@ export interface BackgroundAnnotationJob {
   error: string | null;
 }
 
+/** fetch that fails instead of hanging forever when the analytics server stops answering. */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `The analytics server at ${YOLO_API_BASE} did not respond within ${Math.round(timeoutMs / 1000)}s. ` +
+          'Check that exactly one backend is running on that port, then try again.'
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function startBackgroundAnnotation(options: {
   file?: File;
   videoFilename?: string;
@@ -391,10 +410,11 @@ export async function startBackgroundAnnotation(options: {
     formData.append('class_confidences', JSON.stringify(options.classConfidences));
   }
 
-  const res = await fetch(`${YOLO_API_BASE}/api/background-annotate`, {
-    method: 'POST',
-    body: formData,
-  });
+  const res = await fetchWithTimeout(
+    `${YOLO_API_BASE}/api/background-annotate`,
+    { method: 'POST', body: formData },
+    60_000
+  );
 
   if (!res.ok) {
     const errorText = await res.text();
@@ -405,10 +425,11 @@ export async function startBackgroundAnnotation(options: {
 }
 
 export async function getBackgroundJobStatus(jobId: string): Promise<BackgroundAnnotationJob> {
-  const res = await fetch(`${YOLO_API_BASE}/api/background-jobs/${jobId}`, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
+  const res = await fetchWithTimeout(
+    `${YOLO_API_BASE}/api/background-jobs/${jobId}`,
+    { method: 'GET', headers: { Accept: 'application/json' } },
+    15_000
+  );
 
   if (!res.ok) {
     const errorText = await res.text();

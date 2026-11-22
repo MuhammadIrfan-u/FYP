@@ -119,6 +119,7 @@ export const PassesView: React.FC = () => {
       try {
         const latest = await getBackgroundJobStatus(jobId);
         if (cancelled) return;
+        setStartError(null);
         setJob(latest);
         if (latest.status === 'processing') timer = setTimeout(tick, POLL_MS);
       } catch (err) {

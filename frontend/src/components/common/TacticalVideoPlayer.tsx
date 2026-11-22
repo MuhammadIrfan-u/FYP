@@ -434,6 +434,22 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           badge: 'bg-[#059669] text-white ring-1 ring-white/50',
           name: 'Player with Ball',
         };
+      // Officials are detected so they can be kept out of team and possession
+      // stats; they are drawn only so that exclusion is visible.
+      case 'referee':
+        return {
+          border: 'border-[#3CB4FA]',
+          bg: 'bg-[#3CB4FA]/20',
+          badge: 'bg-[#3CB4FA] text-white',
+          name: 'Referee',
+        };
+      case 'assistant_referee':
+        return {
+          border: 'border-[#78C8FA]',
+          bg: 'bg-[#78C8FA]/20',
+          badge: 'bg-[#78C8FA] text-white',
+          name: 'Assistant Referee',
+        };
       case 'referee':
         return {
           border: 'border-[#64748B]',

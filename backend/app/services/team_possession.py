@@ -31,9 +31,15 @@ import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-PLAYER_CLASSES = ("player", "player with ball")
-CARRIER_CLASS = "player with ball"
-BALL_CLASS = "football"
+from app import model_config
+
+PLAYER_CLASSES = model_config.PLAYER_CLASSES
+CARRIER_CLASS = model_config.CARRIER_CLASS
+BALL_CLASS = model_config.BALL_CLASS
+
+CARRIER_REACH_HEIGHTS = 0.9
+"""How close the ball must be to a player's feet, in player heights, to count
+as carried when the model provides no ``player with ball`` class."""
 
 # Torso crop as fractions of the player bounding box.
 TORSO_Y_RANGE = (0.19, 0.51)
@@ -668,14 +674,24 @@ class TeamPossessionTracker:
             float(det.get("y", 0.0)) + float(det.get("h", 0.0)) / 2.0,
         )
 
-    def _pick_carrier(self, detections: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def _pick_carrier(
+        self,
+        detections: list[dict[str, Any]],
+        frame_shape: tuple[int, int] | None = None,
+    ) -> dict[str, Any] | None:
+        """The player in control of the ball, or ``None``.
+
+        Prefers an explicit ``player with ball`` detection, but the current
+        model has no such class, so it falls back to the player whose feet are
+        nearest the ball.
+        """
         carriers = [
             d
             for d in detections
             if str(d.get("class", "")).lower().strip() == CARRIER_CLASS
         ]
         if not carriers:
-            return None
+            return self._carrier_by_distance(detections, frame_shape)
         if len(carriers) == 1:
             return carriers[0]
         balls = [
@@ -694,6 +710,55 @@ class TeamPossessionTracker:
 
             return min(carriers, key=ball_dist)
         return max(carriers, key=lambda d: float(d.get("confidence", 0.0)))
+
+    def _carrier_by_distance(
+        self,
+        detections: list[dict[str, Any]],
+        frame_shape: tuple[int, int] | None,
+    ) -> dict[str, Any] | None:
+        """Nearest player to the ball, when the model has no carrier class.
+
+        Distance is measured in pixels from the ball to the player's ground
+        point and expressed in player heights, so the threshold holds whatever
+        the camera zoom. Percentages are converted to pixels first: x and y are
+        fractions of different frame dimensions, so mixing them directly
+        distorts distance on any non-square frame.
+        """
+        balls = [
+            d
+            for d in detections
+            if str(d.get("class", "")).lower().strip() == BALL_CLASS
+        ]
+        players = [
+            d
+            for d in detections
+            if str(d.get("class", "")).lower().strip() in PLAYER_CLASSES
+        ]
+        if not balls or not players:
+            return None
+
+        h_px, w_px = frame_shape if frame_shape else (100.0, 100.0)
+        ball = max(balls, key=lambda b: float(b.get("confidence", 0.0)))
+        bx = (
+            (float(ball.get("x", 0.0)) + float(ball.get("w", 0.0)) / 2.0) / 100.0 * w_px
+        )
+        by = (
+            (float(ball.get("y", 0.0)) + float(ball.get("h", 0.0)) / 2.0) / 100.0 * h_px
+        )
+
+        best, best_score = None, float("inf")
+        for d in players:
+            height = float(d.get("h", 0.0)) / 100.0 * h_px
+            if height <= 0:
+                continue
+            feet_x = (
+                (float(d.get("x", 0.0)) + float(d.get("w", 0.0)) / 2.0) / 100.0 * w_px
+            )
+            feet_y = (float(d.get("y", 0.0)) + float(d.get("h", 0.0))) / 100.0 * h_px
+            score = math.hypot(feet_x - bx, feet_y - by) / height
+            if score < best_score:
+                best, best_score = d, score
+        return best if best_score <= CARRIER_REACH_HEIGHTS else None
 
     def process_frame(
         self,
@@ -742,7 +807,7 @@ class TeamPossessionTracker:
             labs = [None if c is None else np.asarray(c["lab"]) for c in colors]
             track_ids = self._match_tracks(boxes, labs)
 
-            carrier_det = self._pick_carrier(detections)
+            carrier_det = self._pick_carrier(detections, frame_bgr.shape[:2])
             teams_now = self.team_info()
             team_hex = {t["team_id"]: t["color_hex"] for t in teams_now}
             team_name = {t["team_id"]: t["color_name"] for t in teams_now}

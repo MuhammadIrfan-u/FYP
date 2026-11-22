@@ -39,11 +39,12 @@ from typing import Any
 
 import numpy as np
 
+from app import model_config
 from app.services.pitch_homography import GOAL_HALF_WIDTH, PitchMapper
 
-PLAYER_CLASSES = ("player", "player with ball")
-BALL_CLASS = "football"
-GOAL_CLASS = "football goal"
+PLAYER_CLASSES = model_config.PLAYER_CLASSES
+BALL_CLASS = model_config.BALL_CLASS
+GOAL_CLASS = model_config.GOAL_CLASS
 TEAM_IDS = (1, 2)
 
 OFF_PITCH_MARGIN_M = 3.0
