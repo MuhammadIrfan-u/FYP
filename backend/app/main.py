@@ -37,6 +37,9 @@ from app.services.video_annotator import (
     list_all_jobs,
 )
 from app.services.video_sync import (
+    build_merge_plan,
+    create_merge_job,
+    get_merge_job,
     render_side_by_side_video,
     synchronize_two_videos,
 )
@@ -933,6 +936,17 @@ class RenderSyncRequest(BaseModel):
     start_delay_b: float = 0.0
 
 
+class MergeSideBySideRequest(BaseModel):
+    """Camera 1 (left) + Camera 2 (right) merged into one clap-aligned MP4."""
+
+    video_a_filename: str
+    video_b_filename: str
+    start_delay_a: float = 0.0
+    start_delay_b: float = 0.0
+    output_height: int | None = Field(1080, ge=120, le=2160)
+    title: str | None = None
+
+
 @app.post("/api/sync-training-videos")
 def sync_training_videos_endpoint(
     file_a: UploadFile | None = File(None),  # noqa: B008
@@ -998,6 +1012,7 @@ def sync_training_videos_endpoint(
         if not f.name.startswith("chunk_")
         and not f.name.startswith("full_")
         and not f.name.startswith("synced_")
+        and not f.name.startswith("merged_")
     ]
 
     if not path_a:
@@ -1035,23 +1050,25 @@ def sync_training_videos_endpoint(
     return sync_result
 
 
+def _resolve_sync_source(video_filename: str) -> Path | None:
+    """Locates a synchronization source video inside the uploads tree."""
+    name = Path(video_filename).name  # no path traversal
+    direct = UPLOADS_DIR / name
+    if direct.exists() and direct.is_file():
+        return direct
+    for p in UPLOADS_DIR.rglob(name):
+        if p.is_file():
+            return p
+    return _resolve_local_video(name)
+
+
 @app.post("/api/render-synced-video")
 def render_synced_video_endpoint(req: RenderSyncRequest):
     """Renders composite side-by-side synchronized comparison video via FFmpeg."""
-    path_a = UPLOADS_DIR / req.video_a_filename
-    path_b = UPLOADS_DIR / req.video_b_filename
+    path_a = _resolve_sync_source(req.video_a_filename)
+    path_b = _resolve_sync_source(req.video_b_filename)
 
-    # Fallback recursive search if in subdirectories
-    if not path_a.exists():
-        for p in UPLOADS_DIR.rglob(req.video_a_filename):
-            path_a = p
-            break
-    if not path_b.exists():
-        for p in UPLOADS_DIR.rglob(req.video_b_filename):
-            path_b = p
-            break
-
-    if not path_a.exists() or not path_b.exists():
+    if not path_a or not path_b:
         raise HTTPException(
             status_code=404, detail="One or both video sources could not be located."
         )
@@ -1078,6 +1095,66 @@ def render_synced_video_endpoint(req: RenderSyncRequest):
         "synced_video_url": f"http://127.0.0.1:8000{rel_url}",
         "relative_url": rel_url,
     }
+
+
+@app.post("/api/merge-side-by-side")
+def merge_side_by_side_endpoint(req: MergeSideBySideRequest):
+    """Merges two clap-synchronized camera feeds into ONE horizontal side-by-side MP4.
+
+    Camera 1 lands on the left half and Camera 2 on the right half. Each pane keeps
+    its own aspect ratio, both panes share the same clap-aligned timeline, and the
+    merged file is written into the regular uploads folder so it can be used as a
+    single input for the detection pipeline (calibration, analysis, annotation).
+    """
+    path_a = _resolve_sync_source(req.video_a_filename)
+    path_b = _resolve_sync_source(req.video_b_filename)
+
+    if not path_a or not path_b:
+        raise HTTPException(
+            status_code=404,
+            detail="One or both camera videos could not be located for merging.",
+        )
+
+    plan = build_merge_plan(
+        path_a,
+        path_b,
+        start_delay_a=req.start_delay_a,
+        start_delay_b=req.start_delay_b,
+        target_height=req.output_height,
+    )
+    if plan["master_duration"] <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not read a playable duration from the camera videos.",
+        )
+
+    raw_stem = (req.title or "merged_cameras").strip() or "merged_cameras"
+    safe_stem = "".join(
+        ch if (ch.isalnum() or ch in "-_") else "_" for ch in raw_stem.replace(" ", "_")
+    )[:48]
+    merged_name = f"merged_{safe_stem}_{uuid.uuid4().hex[:8]}.mp4"
+    output_path = UPLOADS_DIR / merged_name
+    rel_url = f"/api/videos/{merged_name}"
+
+    job = create_merge_job(
+        path_a,
+        path_b,
+        output_path=output_path,
+        relative_url=rel_url,
+        start_delay_a=req.start_delay_a,
+        start_delay_b=req.start_delay_b,
+        target_height=req.output_height,
+    )
+    return {"success": True, **job}
+
+
+@app.get("/api/merge-jobs/{job_id}")
+def get_merge_job_endpoint(job_id: str):
+    """Progress of a side-by-side merge job."""
+    job = get_merge_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Merge job '{job_id}' not found.")
+    return job
 
 
 if __name__ == "__main__":

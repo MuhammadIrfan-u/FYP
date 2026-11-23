@@ -19,7 +19,6 @@ import {
   ArrowRightLeft,
   ChevronRight,
   Maximize2,
-  Film,
   Activity,
   FileVideo,
   Clock,
@@ -27,11 +26,17 @@ import {
   GripVertical,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
-import { SyncTrainingResult } from '@/types/football';
-import { syncTrainingVideos, renderSyncedVideo, YOLO_API_BASE } from '@/lib/yoloApi';
+import { MergeJob, SyncTrainingResult } from '@/types/football';
+import {
+  syncTrainingVideos,
+  startSideBySideMerge,
+  getMergeJobStatus,
+  fetchVideoAsFile,
+  YOLO_API_BASE,
+} from '@/lib/yoloApi';
 
 export const SyncTrainingView: React.FC = () => {
-  const { showToast } = useFootball();
+  const { showToast, uploadFootballVideo, setActivePage } = useFootball();
 
   // Mode: 'original' (both start from 0:00 side-by-side) vs 'synced' (clap transient aligned)
   const [comparisonMode, setComparisonMode] = useState<'original' | 'synced'>('synced');
@@ -54,9 +59,13 @@ export const SyncTrainingView: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [audioMode, setAudioMode] = useState<'both' | 'a' | 'b' | 'mute'>('both');
 
-  // Export render state
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
+  // Side-by-side merge state (one combined MP4: Camera 1 left, Camera 2 right)
+  const [isMerging, setIsMerging] = useState<boolean>(false);
+  const [mergeJob, setMergeJob] = useState<MergeJob | null>(null);
+  const [mergeHeight, setMergeHeight] = useState<number>(1080);
+  const [isSendingToModel, setIsSendingToModel] = useState<boolean>(false);
+  const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const mergePollRef = useRef<number | null>(null);
 
   // Video element refs
   const videoRefA = useRef<HTMLVideoElement>(null);
@@ -447,26 +456,107 @@ export const SyncTrainingView: React.FC = () => {
     }
   };
 
-  // Export Synced Side-by-Side MP4
-  const handleExportSyncedVideo = async () => {
-    if (!syncResult) return;
-    setIsExporting(true);
+  // Stop polling a merge job when the view unmounts
+  useEffect(() => {
+    return () => {
+      if (mergePollRef.current) window.clearInterval(mergePollRef.current);
+    };
+  }, []);
+
+  // Merge both synchronized angles into ONE side-by-side MP4 on the server
+  const handleMergeSideBySide = async () => {
+    if (!syncResult || isMerging) return;
+
+    if (mergePollRef.current) window.clearInterval(mergePollRef.current);
+    setIsMerging(true);
+    setMergeJob(null);
+
     try {
-      showToast('Rendering side-by-side composite video on server...');
-      const res = await renderSyncedVideo({
+      const job = await startSideBySideMerge({
         videoAFilename: syncResult.video_a.filename || 'angle_a.mp4',
         videoBFilename: syncResult.video_b.filename || 'angle_b.mp4',
-        offsetSeconds: syncResult.offset_seconds + userOffsetAdjustment,
         startDelayA: effectiveDelayA,
         startDelayB: effectiveDelayB,
+        outputHeight: mergeHeight,
+        title: 'cam1_cam2',
       });
-      setExportedVideoUrl(res.synced_video_url);
-      showToast('Side-by-side video rendered successfully!');
+      setMergeJob(job);
+      showToast('Merging Camera 1 and Camera 2 into a single video...');
+
+      // Poll merge progress until the composite MP4 is ready
+      mergePollRef.current = window.setInterval(async () => {
+        try {
+          const status = await getMergeJobStatus(job.job_id);
+          setMergeJob(status);
+
+          if (status.status === 'completed' || status.status === 'failed') {
+            if (mergePollRef.current) window.clearInterval(mergePollRef.current);
+            mergePollRef.current = null;
+            setIsMerging(false);
+            showToast(
+              status.status === 'completed'
+                ? 'Merged side-by-side video is ready to preview and download.'
+                : status.error || 'Merge failed.'
+            );
+          }
+        } catch (pollErr) {
+          console.error(pollErr);
+        }
+      }, 1500);
     } catch (err) {
       console.error(err);
-      showToast(err instanceof Error ? err.message : 'Render failed.');
+      setIsMerging(false);
+      showToast(err instanceof Error ? err.message : 'Could not start the merge.');
+    }
+  };
+
+  // Download the merged MP4 (fetched as a blob, since the backend is a different origin)
+  const handleDownloadMerged = async () => {
+    if (!mergeJob?.merged_video_url || isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const file = await fetchVideoAsFile(
+        mergeJob.merged_video_url,
+        mergeJob.merged_filename
+      );
+      const blobUrl = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = blobUrl;
+      anchor.download = mergeJob.merged_filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error(err);
+      showToast(err instanceof Error ? err.message : 'Download failed.');
     } finally {
-      setIsExporting(false);
+      setIsDownloading(false);
+    }
+  };
+
+  // Register the merged MP4 as a normal session so the AI model can analyse it
+  const handleUseMergedForAnalysis = async () => {
+    if (!mergeJob?.merged_video_url || isSendingToModel) return;
+    setIsSendingToModel(true);
+    try {
+      showToast('Adding the merged video to your sessions...');
+      const file = await fetchVideoAsFile(
+        mergeJob.merged_video_url,
+        mergeJob.merged_filename
+      );
+      const res = await uploadFootballVideo(file, 'Merged Camera 1 + Camera 2');
+      if (res.success) {
+        showToast('Merged video added as a session. Calibrate the pitch to analyse it.');
+        setActivePage('upload');
+      } else {
+        showToast(res.error || 'Could not add the merged video as a session.');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(err instanceof Error ? err.message : 'Could not add the merged video.');
+    } finally {
+      setIsSendingToModel(false);
     }
   };
 
@@ -539,7 +629,8 @@ export const SyncTrainingView: React.FC = () => {
                 setFileB(null);
                 setSampleFilenameA('');
                 setSampleFilenameB('');
-                setExportedVideoUrl(null);
+                setMergeJob(null);
+                setIsMerging(false);
                 setIsPlaying(false);
               }}
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#EEEBE3] text-[#242424] hover:bg-[#E2DDD2] border border-[#D9D3C5] transition-all flex items-center gap-2"
@@ -563,8 +654,8 @@ export const SyncTrainingView: React.FC = () => {
                     A
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-[#242424]">Camera Angle A</h3>
-                    <p className="text-[11px] text-[#858585]">e.g. Sideline Tactical View</p>
+                    <h3 className="text-sm font-bold text-[#242424]">Camera 1 (Angle A)</h3>
+                    <p className="text-[11px] text-[#858585]">e.g. Sideline view &bull; merged on the left</p>
                   </div>
                 </div>
                 {(fileA || sampleFilenameA) && (
@@ -629,8 +720,8 @@ export const SyncTrainingView: React.FC = () => {
                     B
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-[#242424]">Camera Angle B</h3>
-                    <p className="text-[11px] text-[#858585]">e.g. Endzone / Behind Goal View</p>
+                    <h3 className="text-sm font-bold text-[#242424]">Camera 2 (Angle B)</h3>
+                    <p className="text-[11px] text-[#858585]">e.g. Behind goal view &bull; merged on the right</p>
                   </div>
                 </div>
                 {(fileB || sampleFilenameB) && (
@@ -1423,56 +1514,186 @@ export const SyncTrainingView: React.FC = () => {
               </div>
             </div>
 
-            {/* Export Render Card */}
+            {/* Merge Into One Video Card */}
             <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-2 border-b border-[#E8E3D8] pb-3 mb-3">
-                  <Film className="w-4 h-4 text-[#262626]" />
+                  <Layers className="w-4 h-4 text-[#262626]" />
                   <h3 className="text-sm font-bold text-[#242424]">
-                    Composite Video Export
+                    Merge Into One Video
                   </h3>
                 </div>
                 <p className="text-xs text-[#858585] leading-relaxed">
-                  Render a unified side-by-side MP4 combining both angles with audio synchronized at the first loudest clap.
+                  Combine both angles horizontally into a single MP4 &mdash; Camera 1 on the left,
+                  Camera 2 on the right &mdash; aligned at the clap, with each half keeping its
+                  original aspect ratio and both halves sharing the same timeline.
                 </p>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2.5">
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#858585]">
+                    Output height per half
+                  </span>
+                  <select
+                    value={mergeHeight}
+                    disabled={isMerging}
+                    onChange={(e) => setMergeHeight(parseInt(e.target.value, 10))}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-[#E8E3D8] text-xs text-[#242424] disabled:opacity-60"
+                  >
+                    <option value={720}>720p (fastest merge)</option>
+                    <option value={1080}>1080p (recommended)</option>
+                    <option value={1440}>1440p</option>
+                    <option value={2160}>Match source (up to 4K)</option>
+                  </select>
+                </label>
+
                 <button
-                  onClick={handleExportSyncedVideo}
-                  disabled={isExporting}
+                  onClick={handleMergeSideBySide}
+                  disabled={isMerging}
                   className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm ${
-                    isExporting
+                    isMerging
                       ? 'bg-[#E5E0D4] text-[#858585] cursor-not-allowed'
                       : 'bg-[#262626] text-white hover:bg-[#383838]'
                   }`}
                 >
-                  {isExporting ? (
+                  {isMerging ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Rendering MP4...</span>
+                      <span>Merging... {(mergeJob?.progress_percent ?? 0).toFixed(0)}%</span>
                     </>
                   ) : (
                     <>
-                      <Download className="w-4 h-4 text-[#16A34A]" />
-                      <span>Render Side-by-Side MP4</span>
+                      <Layers className="w-4 h-4 text-[#16A34A]" />
+                      <span>Merge Side-by-Side MP4</span>
                     </>
                   )}
                 </button>
 
-                {exportedVideoUrl && (
-                  <a
-                    href={exportedVideoUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full py-2 rounded-xl text-center text-xs font-bold text-[#16A34A] bg-[#DCFCE7] hover:bg-[#BBF7D0] border border-[#86EFAC] block transition-colors"
-                  >
-                    Open Rendered MP4 &darr;
-                  </a>
+                {/* Merge progress */}
+                {mergeJob && mergeJob.status === 'processing' && (
+                  <div className="space-y-1">
+                    <div className="w-full h-2 bg-[#E5E0D4] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#16A34A] rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(2, mergeJob.progress_percent)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-[#858585] font-mono">
+                      {mergeJob.processed_seconds.toFixed(1)}s / {mergeJob.duration.toFixed(1)}s
+                      &nbsp;&bull;&nbsp; {mergeJob.width}&times;{mergeJob.height} @ {mergeJob.fps}fps
+                    </p>
+                  </div>
+                )}
+
+                {mergeJob?.status === 'failed' && (
+                  <p className="text-[10px] text-[#991B1B] bg-[#FEF2F2] border border-[#FECACA] rounded-lg p-2 flex items-start gap-1.5">
+                    <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                    <span>{mergeJob.error || 'The merge failed. Try a lower output height.'}</span>
+                  </p>
                 )}
               </div>
             </div>
           </div>
+
+          {/* MERGED SINGLE-VIDEO RESULT: preview, download, feed to the AI model */}
+          {mergeJob?.status === 'completed' && mergeJob.merged_video_url && (
+            <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E8E3D8] pb-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-[#16A34A]" />
+                  <div>
+                    <h3 className="text-sm font-bold text-[#242424]">
+                      Merged Side-by-Side Video
+                    </h3>
+                    <p className="text-[11px] text-[#858585] font-mono">
+                      {mergeJob.width}&times;{mergeJob.height} &bull; {mergeJob.fps}fps &bull;{' '}
+                      {mergeJob.duration.toFixed(1)}s &bull;{' '}
+                      {(mergeJob.size_bytes / (1024 * 1024)).toFixed(1)} MB &bull;{' '}
+                      {mergeJob.has_audio ? 'with audio' : 'no audio'}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A] border border-[#BBF7D0] self-start sm:self-auto">
+                  Single file &bull; ready for AI analysis
+                </span>
+              </div>
+
+              {/* Merged preview player */}
+              <div className="rounded-xl overflow-hidden bg-black border border-[#E8E3D8]">
+                <video
+                  key={mergeJob.merged_video_url}
+                  src={mergeJob.merged_video_url}
+                  className="w-full max-h-[420px] bg-black"
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={handleDownloadMerged}
+                  disabled={isDownloading}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                    isDownloading
+                      ? 'bg-[#E5E0D4] text-[#858585] cursor-not-allowed'
+                      : 'bg-[#262626] text-white hover:bg-[#383838]'
+                  }`}
+                >
+                  {isDownloading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Preparing Download...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4 text-[#16A34A]" />
+                      <span>Download Merged MP4</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleUseMergedForAnalysis}
+                  disabled={isSendingToModel}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                    isSendingToModel
+                      ? 'bg-[#E5E0D4] text-[#858585] cursor-not-allowed'
+                      : 'bg-[#16A34A] text-white hover:bg-[#15803D]'
+                  }`}
+                >
+                  {isSendingToModel ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Adding Session...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-4 h-4" />
+                      <span>Use as AI Model Input</span>
+                    </>
+                  )}
+                </button>
+
+                <a
+                  href={mergeJob.merged_video_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-[#242424] bg-[#EEEBE3] hover:bg-[#E2DDD2] border border-[#D9D3C5] transition-all flex items-center gap-2"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                  <span>Open In New Tab</span>
+                </a>
+              </div>
+
+              <p className="text-[11px] text-[#858585] leading-relaxed">
+                <strong className="text-[#242424]">Use as AI Model Input</strong> adds this merged
+                file to your sessions on the Upload page, where you place the pitch landmarks and
+                run detection on it exactly like any single-camera video.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

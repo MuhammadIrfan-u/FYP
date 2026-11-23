@@ -1,9 +1,13 @@
 import logging
 import shutil
 import subprocess
+import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -347,6 +351,342 @@ def synchronize_two_videos(
     }
 
 
+def probe_video_info(video_path: Path) -> dict[str, Any]:
+    """Reads width/height/fps/duration with OpenCV and detects an audio track with FFmpeg."""
+    info: dict[str, Any] = {
+        "width": 0,
+        "height": 0,
+        "fps": 30.0,
+        "duration": 0.0,
+        "has_audio": False,
+    }
+    if not video_path.exists():
+        return info
+
+    cap = cv2.VideoCapture(str(video_path))
+    if cap.isOpened():
+        info["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        info["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
+        if fps > 0:
+            info["fps"] = round(float(fps), 3)
+            info["duration"] = (
+                round(float(frames) / float(fps), 3) if frames > 0 else 0.0
+            )
+    cap.release()
+
+    # FFmpeg prints the stream layout on stderr for a plain "-i" probe.
+    try:
+        probe = subprocess.run(
+            [FFMPEG_EXE, "-hide_banner", "-i", str(video_path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+        stderr_text = probe.stderr.decode("utf-8", errors="ignore")
+        info["has_audio"] = ": Audio:" in stderr_text
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not probe audio streams for {video_path.name}: {e}")
+
+    return info
+
+
+def _even(value: float, minimum: int = 2) -> int:
+    """Rounds to the nearest even integer (H.264 with yuv420p needs even dimensions)."""
+    v = round(value / 2.0) * 2
+    return max(minimum, v)
+
+
+def build_merge_plan(
+    video_a_path: Path,
+    video_b_path: Path,
+    start_delay_a: float = 0.0,
+    start_delay_b: float = 0.0,
+    target_height: int | None = 1080,
+) -> dict[str, Any]:
+    """Works out the merged geometry and timeline for a side-by-side composite.
+
+    Both panes are scaled to one shared height and each pane keeps its own source
+    aspect ratio (no stretching, no letterboxing). Head padding puts both feeds on a
+    common clap-aligned timeline, and tail padding makes both panes last exactly as
+    long as the merged video, so timestamps and duration match across the output.
+    """
+    info_a = probe_video_info(video_a_path)
+    info_b = probe_video_info(video_b_path)
+
+    h_a = info_a["height"] or 720
+    h_b = info_b["height"] or 720
+    w_a = info_a["width"] or 1280
+    w_b = info_b["width"] or 1280
+
+    height = min(h_a, h_b)
+    if target_height and target_height > 0:
+        height = min(height, int(target_height))
+    height = _even(height or 720, minimum=120)
+
+    pane_w_a = _even(w_a * (height / float(h_a)), minimum=120)
+    pane_w_b = _even(w_b * (height / float(h_b)), minimum=120)
+
+    fps = min(info_a["fps"] or 30.0, info_b["fps"] or 30.0)
+    fps = round(max(10.0, min(60.0, fps)), 3)
+
+    delay_a = max(0.0, round(float(start_delay_a), 3))
+    delay_b = max(0.0, round(float(start_delay_b), 3))
+
+    end_a = delay_a + (info_a["duration"] or 0.0)
+    end_b = delay_b + (info_b["duration"] or 0.0)
+    master_duration = round(max(end_a, end_b), 3)
+
+    return {
+        "video_a": info_a,
+        "video_b": info_b,
+        "height": height,
+        "pane_width_a": pane_w_a,
+        "pane_width_b": pane_w_b,
+        "output_width": pane_w_a + pane_w_b,
+        "output_height": height,
+        "fps": fps,
+        "start_delay_a": delay_a,
+        "start_delay_b": delay_b,
+        "tail_pad_a": max(0.0, round(master_duration - end_a, 3)),
+        "tail_pad_b": max(0.0, round(master_duration - end_b, 3)),
+        "master_duration": master_duration,
+    }
+
+
+def _pane_filter(
+    index: int,
+    pane_width: int,
+    height: int,
+    fps: float,
+    head_pad: float,
+    tail_pad: float,
+    label: str,
+) -> str:
+    chain = f"[{index}:v]scale={pane_width}:{height}:flags=bicubic,setsar=1,fps={fps}"
+    if head_pad > 0.01:
+        chain += f",tpad=start_duration={head_pad:.3f}:start_mode=add:color=black"
+    if tail_pad > 0.01:
+        chain += f",tpad=stop_duration={tail_pad:.3f}:stop_mode=add:color=black"
+    return f"{chain}[{label}]"
+
+
+def build_merge_command(
+    video_a_path: Path,
+    video_b_path: Path,
+    output_path: Path,
+    plan: dict[str, Any],
+    max_duration: float | None = None,
+    crf: int = 23,
+    preset: str = "veryfast",
+    with_progress: bool = False,
+) -> list[str]:
+    """Builds the FFmpeg command that hstacks Camera 1 (left) and Camera 2 (right)."""
+    duration = plan["master_duration"]
+    if max_duration and max_duration > 0:
+        duration = min(duration, float(max_duration))
+
+    filters = [
+        _pane_filter(
+            0,
+            plan["pane_width_a"],
+            plan["height"],
+            plan["fps"],
+            plan["start_delay_a"],
+            plan["tail_pad_a"],
+            "v0",
+        ),
+        _pane_filter(
+            1,
+            plan["pane_width_b"],
+            plan["height"],
+            plan["fps"],
+            plan["start_delay_b"],
+            plan["tail_pad_b"],
+            "v1",
+        ),
+        "[v0][v1]hstack=inputs=2[vout]",
+    ]
+
+    # Audio: delay each track onto the shared timeline, then mix whatever exists.
+    has_a = bool(plan["video_a"]["has_audio"])
+    has_b = bool(plan["video_b"]["has_audio"])
+    audio_label: str | None = None
+
+    def delayed(stream: str, delay: float, label: str) -> str:
+        chain = f"[{stream}]"
+        if delay > 0.01:
+            chain += f"adelay=delays={int(delay * 1000)}:all=1,"
+        chain += "apad"
+        return f"{chain}[{label}]"
+
+    if has_a and has_b:
+        filters.append(delayed("0:a", plan["start_delay_a"], "a0"))
+        filters.append(delayed("1:a", plan["start_delay_b"], "a1"))
+        filters.append(
+            "[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]"
+        )
+        audio_label = "[aout]"
+    elif has_a:
+        filters.append(delayed("0:a", plan["start_delay_a"], "aout"))
+        audio_label = "[aout]"
+    elif has_b:
+        filters.append(delayed("1:a", plan["start_delay_b"], "aout"))
+        audio_label = "[aout]"
+
+    cmd = [FFMPEG_EXE, "-y", "-hide_banner"]
+    if with_progress:
+        cmd += ["-nostats", "-progress", "pipe:1"]
+    cmd += [
+        "-i",
+        str(video_a_path),
+        "-i",
+        str(video_b_path),
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        "[vout]",
+    ]
+    if audio_label:
+        cmd += ["-map", audio_label, "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+    else:
+        cmd += ["-an"]
+    cmd += [
+        "-c:v",
+        "libx264",
+        "-preset",
+        preset,
+        "-crf",
+        str(crf),
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(plan["fps"]),
+        "-movflags",
+        "+faststart",
+        "-t",
+        f"{duration:.3f}",
+        str(output_path),
+    ]
+    return cmd
+
+
+def merge_side_by_side_video(
+    video_a_path: Path,
+    video_b_path: Path,
+    output_path: Path,
+    start_delay_a: float = 0.0,
+    start_delay_b: float = 0.0,
+    target_height: int | None = 1080,
+    max_duration: float | None = None,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Merges two clap-synchronized feeds into one horizontal side-by-side MP4.
+
+    Camera 1 goes on the left, Camera 2 on the right. Each pane keeps its original
+    aspect ratio, both panes share one timeline, and the result is an ordinary MP4
+    that can be fed straight into the detection pipeline as a single video.
+
+    progress_cb(percent, seconds_done) is called while FFmpeg encodes.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    plan = build_merge_plan(
+        video_a_path,
+        video_b_path,
+        start_delay_a=start_delay_a,
+        start_delay_b=start_delay_b,
+        target_height=target_height,
+    )
+    total_duration = plan["master_duration"]
+    if max_duration and max_duration > 0:
+        total_duration = min(total_duration, float(max_duration))
+
+    cmd = build_merge_command(
+        video_a_path,
+        video_b_path,
+        output_path,
+        plan,
+        max_duration=max_duration,
+        with_progress=progress_cb is not None,
+    )
+
+    logger.info(
+        "Merging side-by-side video: %sx%s @ %sfps, %.2fs -> %s",
+        plan["output_width"],
+        plan["output_height"],
+        plan["fps"],
+        total_duration,
+        output_path.name,
+    )
+
+    try:
+        if progress_cb is None:
+            res = subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return_code = res.returncode
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line.startswith("out_time_ms="):
+                        continue
+                    raw = line.split("=", 1)[1]
+                    try:
+                        seconds = max(0.0, int(raw) / 1_000_000.0)
+                    except ValueError:
+                        continue
+                    percent = (
+                        min(99.0, round(seconds / total_duration * 100.0, 1))
+                        if total_duration > 0
+                        else 0.0
+                    )
+                    progress_cb(percent, round(seconds, 2))
+            proc.wait()
+            return_code = proc.returncode
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Side-by-side merge failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "plan": plan,
+            "duration": total_duration,
+        }
+
+    ok = return_code == 0 and output_path.exists() and output_path.stat().st_size > 0
+    if not ok:
+        return {
+            "success": False,
+            "error": f"FFmpeg exited with code {return_code}.",
+            "plan": plan,
+            "duration": total_duration,
+        }
+
+    return {
+        "success": True,
+        "plan": plan,
+        "duration": total_duration,
+        "width": plan["output_width"],
+        "height": plan["output_height"],
+        "fps": plan["fps"],
+        "size_bytes": output_path.stat().st_size,
+        "has_audio": bool(plan["video_a"]["has_audio"] or plan["video_b"]["has_audio"]),
+    }
+
+
 def render_side_by_side_video(
     video_a_path: Path,
     video_b_path: Path,
@@ -354,84 +694,162 @@ def render_side_by_side_video(
     output_path: Path,
     start_delay_a: float = 0.0,
     start_delay_b: float = 0.0,
-    width: int = 1280,
-    height: int = 720,
+    preview_duration: float | None = 60.0,
+    target_height: int | None = 720,
 ) -> bool:
-    """Renders a combined side-by-side synchronized video using FFmpeg.
-
-    - Video A on the left, Video B on the right.
-    - Handles differing start times via tpad and audio delay so the claps coincide.
-    - Handles differing video lengths cleanly.
-    """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    half_width = width // 2
-
-    # If start delays not explicitly given, compute from offset:
-    # offset_seconds = clap_b - clap_a
-    # If offset_seconds < 0 (clap_a > clap_b): Camera A started earlier, Camera B needs delay
+    """Renders a short side-by-side preview clip (used by the quick preview endpoint)."""
+    # If start delays are not given explicitly, derive them from the clap offset:
+    # offset_seconds = clap_b - clap_a, so a negative offset means Camera A started first.
     if start_delay_a == 0.0 and start_delay_b == 0.0:
         if offset_seconds < 0:
             start_delay_b = abs(offset_seconds)
         elif offset_seconds > 0:
             start_delay_a = offset_seconds
 
-    # Construct FFmpeg filter complex:
-    # Scale both inputs to half_width x height
-    # Apply tpad to whichever video started later
-    pad_a = (
-        f",tpad=start_duration={start_delay_a}:start_mode=add:color=black"
-        if start_delay_a > 0.02
-        else ""
+    result = merge_side_by_side_video(
+        video_a_path,
+        video_b_path,
+        output_path,
+        start_delay_a=start_delay_a,
+        start_delay_b=start_delay_b,
+        target_height=target_height,
+        max_duration=preview_duration,
     )
-    pad_b = (
-        f",tpad=start_duration={start_delay_b}:start_mode=add:color=black"
-        if start_delay_b > 0.02
-        else ""
-    )
+    return bool(result.get("success"))
 
-    filter_complex = (
-        f"[0:v]scale={half_width}:{height}:force_original_aspect_ratio=decrease,pad={half_width}:{height}:(ow-iw)/2:(oh-ih)/2{pad_a}[v0];"
-        f"[1:v]scale={half_width}:{height}:force_original_aspect_ratio=decrease,pad={half_width}:{height}:(ow-iw)/2:(oh-ih)/2{pad_b}[v1];"
-        f"[v0][v1]hstack=inputs=2[vout]"
-    )
 
-    cmd = [
-        FFMPEG_EXE,
-        "-y",
-        "-i",
-        str(video_a_path),
-        "-i",
-        str(video_b_path),
-        "-filter_complex",
-        filter_complex,
-        "-map",
-        "[vout]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        "-t",
-        "60",  # preview render duration
-        str(output_path),
-    ]
+# ---------------------------------------------------------------------------
+# Background merge jobs (full-length merges take minutes, so they run detached)
+# ---------------------------------------------------------------------------
 
-    try:
-        res = subprocess.run(
-            cmd,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
+MERGE_JOBS: dict[str, dict[str, Any]] = {}
+MERGE_JOBS_LOCK = threading.Lock()
+
+
+def _update_merge_job(job_id: str, **fields: Any) -> None:
+    with MERGE_JOBS_LOCK:
+        job = MERGE_JOBS.get(job_id)
+        if job is not None:
+            job.update(fields)
+
+
+def get_merge_job(job_id: str) -> dict[str, Any] | None:
+    with MERGE_JOBS_LOCK:
+        job = MERGE_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _run_merge_worker(
+    job_id: str,
+    video_a_path: Path,
+    video_b_path: Path,
+    output_path: Path,
+    start_delay_a: float,
+    start_delay_b: float,
+    target_height: int | None,
+    relative_url: str,
+) -> None:
+    def on_progress(percent: float, seconds: float) -> None:
+        _update_merge_job(
+            job_id,
+            progress_percent=percent,
+            processed_seconds=seconds,
+            status="processing",
         )
-        return (
-            res.returncode == 0
-            and output_path.exists()
-            and output_path.stat().st_size > 0
+
+    result = merge_side_by_side_video(
+        video_a_path,
+        video_b_path,
+        output_path,
+        start_delay_a=start_delay_a,
+        start_delay_b=start_delay_b,
+        target_height=target_height,
+        progress_cb=on_progress,
+    )
+
+    if not result.get("success"):
+        _update_merge_job(
+            job_id,
+            status="failed",
+            error=result.get("error") or "Merge failed.",
+            progress_percent=0.0,
         )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to render side-by-side video: {e}")
-        return False
+        return
+
+    _update_merge_job(
+        job_id,
+        status="completed",
+        progress_percent=100.0,
+        processed_seconds=result["duration"],
+        duration=result["duration"],
+        width=result["width"],
+        height=result["height"],
+        fps=result["fps"],
+        size_bytes=result["size_bytes"],
+        has_audio=result["has_audio"],
+        merged_filename=output_path.name,
+        relative_url=relative_url,
+        merged_video_url=f"http://127.0.0.1:8000{relative_url}",
+    )
+
+
+def create_merge_job(
+    video_a_path: Path,
+    video_b_path: Path,
+    output_path: Path,
+    relative_url: str,
+    start_delay_a: float = 0.0,
+    start_delay_b: float = 0.0,
+    target_height: int | None = 1080,
+) -> dict[str, Any]:
+    """Starts a background side-by-side merge and returns the initial job record."""
+    job_id = f"merge_{uuid.uuid4().hex[:10]}"
+    plan = build_merge_plan(
+        video_a_path,
+        video_b_path,
+        start_delay_a=start_delay_a,
+        start_delay_b=start_delay_b,
+        target_height=target_height,
+    )
+
+    job: dict[str, Any] = {
+        "job_id": job_id,
+        "status": "processing",
+        "progress_percent": 0.0,
+        "processed_seconds": 0.0,
+        "duration": plan["master_duration"],
+        "width": plan["output_width"],
+        "height": plan["output_height"],
+        "fps": plan["fps"],
+        "size_bytes": 0,
+        "has_audio": bool(plan["video_a"]["has_audio"] or plan["video_b"]["has_audio"]),
+        "source_a": video_a_path.name,
+        "source_b": video_b_path.name,
+        "start_delay_a": plan["start_delay_a"],
+        "start_delay_b": plan["start_delay_b"],
+        "merged_filename": output_path.name,
+        "relative_url": None,
+        "merged_video_url": None,
+        "error": None,
+        "created_at": time.time(),
+    }
+
+    with MERGE_JOBS_LOCK:
+        MERGE_JOBS[job_id] = job
+
+    threading.Thread(
+        target=_run_merge_worker,
+        kwargs={
+            "job_id": job_id,
+            "video_a_path": video_a_path,
+            "video_b_path": video_b_path,
+            "output_path": output_path,
+            "start_delay_a": start_delay_a,
+            "start_delay_b": start_delay_b,
+            "target_height": target_height,
+            "relative_url": relative_url,
+        },
+        daemon=True,
+    ).start()
+
+    return dict(job)

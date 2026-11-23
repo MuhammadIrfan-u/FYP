@@ -464,6 +464,28 @@ export interface SyncVideoChannel {
   waveform: number[];
 }
 
+/** Background job that merges Camera 1 + Camera 2 into one side-by-side MP4. */
+export interface MergeJob {
+  job_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  progress_percent: number;
+  processed_seconds: number;
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  size_bytes: number;
+  has_audio: boolean;
+  source_a: string;
+  source_b: string;
+  start_delay_a: number;
+  start_delay_b: number;
+  merged_filename: string;
+  relative_url: string | null;
+  merged_video_url: string | null;
+  error: string | null;
+}
+
 export interface SyncTrainingResult {
   success: boolean;
   sync_id: string;
