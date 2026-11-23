@@ -937,10 +937,19 @@ class RenderSyncRequest(BaseModel):
 
 
 class MergeSideBySideRequest(BaseModel):
-    """Camera 1 (left) + Camera 2 (right) merged into one clap-aligned MP4."""
+    """Camera 1 (left) + Camera 2 (right) merged into one clap-aligned MP4.
+
+    `trim_start_a` / `trim_start_b` are each feed's sync point (its clap time), so the
+    merge starts from the synchronized moment in both feeds and merged 0:00 is the
+    same real-world instant on both halves. With `trim_to_overlap` the merge also ends
+    when the first feed runs out, so both halves show footage for the whole file.
+    """
 
     video_a_filename: str
     video_b_filename: str
+    trim_start_a: float = Field(0.0, ge=0.0)
+    trim_start_b: float = Field(0.0, ge=0.0)
+    trim_to_overlap: bool = True
     start_delay_a: float = 0.0
     start_delay_b: float = 0.0
     output_height: int | None = Field(1080, ge=120, le=2160)
@@ -1101,10 +1110,10 @@ def render_synced_video_endpoint(req: RenderSyncRequest):
 def merge_side_by_side_endpoint(req: MergeSideBySideRequest):
     """Merges two clap-synchronized camera feeds into ONE horizontal side-by-side MP4.
 
-    Camera 1 lands on the left half and Camera 2 on the right half. Each pane keeps
-    its own aspect ratio, both panes share the same clap-aligned timeline, and the
-    merged file is written into the regular uploads folder so it can be used as a
-    single input for the detection pipeline (calibration, analysis, annotation).
+    Camera 1 lands on the left half and Camera 2 on the right half. The merge starts
+    at the synchronized moment in both feeds, each pane keeps its own aspect ratio,
+    and the merged file is written into the regular uploads folder so it can be used
+    as a single input for the detection pipeline (calibration, analysis, annotation).
     """
     path_a = _resolve_sync_source(req.video_a_filename)
     path_b = _resolve_sync_source(req.video_b_filename)
@@ -1120,12 +1129,18 @@ def merge_side_by_side_endpoint(req: MergeSideBySideRequest):
         path_b,
         start_delay_a=req.start_delay_a,
         start_delay_b=req.start_delay_b,
+        trim_start_a=req.trim_start_a,
+        trim_start_b=req.trim_start_b,
+        trim_to_overlap=req.trim_to_overlap,
         target_height=req.output_height,
     )
-    if plan["master_duration"] <= 0:
+    if plan["master_duration"] <= 0.2:
         raise HTTPException(
             status_code=422,
-            detail="Could not read a playable duration from the camera videos.",
+            detail=(
+                "The two feeds do not overlap after the sync point, so there is "
+                "nothing to merge. Check the detected clap positions."
+            ),
         )
 
     raw_stem = (req.title or "merged_cameras").strip() or "merged_cameras"
@@ -1143,6 +1158,9 @@ def merge_side_by_side_endpoint(req: MergeSideBySideRequest):
         relative_url=rel_url,
         start_delay_a=req.start_delay_a,
         start_delay_b=req.start_delay_b,
+        trim_start_a=req.trim_start_a,
+        trim_start_b=req.trim_start_b,
+        trim_to_overlap=req.trim_to_overlap,
         target_height=req.output_height,
     )
     return {"success": True, **job}

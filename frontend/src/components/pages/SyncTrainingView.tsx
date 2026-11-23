@@ -134,6 +134,24 @@ export const SyncTrainingView: React.FC = () => {
   const effectiveDelayA = Math.max(0, baseStartDelayA - (userOffsetAdjustment < 0 ? Math.abs(userOffsetAdjustment) : 0));
   const effectiveDelayB = Math.max(0, baseStartDelayB + (userOffsetAdjustment > 0 ? userOffsetAdjustment : 0));
 
+  // Merge cut points: the merged file starts AT the clap in both feeds, so merged
+  // 0:00 is the same real-world instant on both halves. The micro-adjustment shifts
+  // Camera 2 against Camera 1 (positive = Camera 2 appears later), and if that would
+  // push Camera 2's cut before its own start, Camera 1 absorbs the remainder.
+  let trimA = clapA;
+  let trimB = clapB - userOffsetAdjustment;
+  if (trimB < 0) {
+    trimA += -trimB;
+    trimB = 0;
+  }
+  const mergeTrimA = Math.max(0, Math.round(trimA * 1000) / 1000);
+  const mergeTrimB = Math.max(0, Math.round(trimB * 1000) / 1000);
+  // Footage both cameras actually recorded after the sync point.
+  const mergeOverlapDuration = Math.max(
+    0,
+    Math.min(durationA - mergeTrimA, durationB - mergeTrimB)
+  );
+
   const masterClapTime = Math.max(clapA, clapB);
   const totalMasterDuration = comparisonMode === 'synced'
     ? Math.max(effectiveDelayA + durationA, effectiveDelayB + durationB)
@@ -475,8 +493,9 @@ export const SyncTrainingView: React.FC = () => {
       const job = await startSideBySideMerge({
         videoAFilename: syncResult.video_a.filename || 'angle_a.mp4',
         videoBFilename: syncResult.video_b.filename || 'angle_b.mp4',
-        startDelayA: effectiveDelayA,
-        startDelayB: effectiveDelayB,
+        trimStartA: mergeTrimA,
+        trimStartB: mergeTrimB,
+        trimToOverlap: true,
         outputHeight: mergeHeight,
         title: 'cam1_cam2',
       });
@@ -837,6 +856,26 @@ export const SyncTrainingView: React.FC = () => {
               <p className="text-xs text-[#555555]">
                 {syncResult.message}
               </p>
+
+              {/* The two detected claps turned out to be different sounds */}
+              {syncResult.clap_corrected && (
+                <div className="mt-1.5 p-2 rounded-xl bg-[#FEFCE8] border border-[#FDE68A] text-[11px] text-[#854D0E] flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#D97706]" />
+                  <span>
+                    The two loudest sounds were <strong>different events</strong>, so the clap
+                    markers were re-anchored from the audio
+                    {syncResult.alignment?.clap_offset != null && (
+                      <>
+                        {' '}(clap guess {syncResult.alignment.clap_offset >= 0 ? '+' : ''}
+                        {syncResult.alignment.clap_offset.toFixed(2)}s &rarr; verified{' '}
+                        {syncResult.offset_seconds >= 0 ? '+' : ''}
+                        {syncResult.offset_seconds.toFixed(2)}s)
+                      </>
+                    )}
+                    . Check the playback below and drag a 👏 pin if it still looks off.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Quick Jump to Clap Button */}
@@ -1525,9 +1564,28 @@ export const SyncTrainingView: React.FC = () => {
                 </div>
                 <p className="text-xs text-[#858585] leading-relaxed">
                   Combine both angles horizontally into a single MP4 &mdash; Camera 1 on the left,
-                  Camera 2 on the right &mdash; aligned at the clap, with each half keeping its
-                  original aspect ratio and both halves sharing the same timeline.
+                  Camera 2 on the right. The merge <strong className="text-[#242424]">starts at
+                  the clap</strong> in both feeds and ends when the first feed runs out, so every
+                  frame shares one clock and both halves always show real footage.
                 </p>
+
+                {/* What will actually be cut and merged */}
+                <div className="mt-3 p-2.5 rounded-xl bg-white border border-[#E8E3D8] space-y-1 text-[10px] font-mono text-[#555555]">
+                  <div className="flex items-center justify-between">
+                    <span>Cut Camera 1 at</span>
+                    <span className="font-bold text-[#242424]">{mergeTrimA.toFixed(2)}s</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Cut Camera 2 at</span>
+                    <span className="font-bold text-[#242424]">{mergeTrimB.toFixed(2)}s</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-[#F0ECE4]">
+                    <span>Shared footage</span>
+                    <span className="font-bold text-[#16A34A]">
+                      {formatTime(mergeOverlapDuration)}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-2.5">
@@ -1615,7 +1673,7 @@ export const SyncTrainingView: React.FC = () => {
                   </div>
                 </div>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A] border border-[#BBF7D0] self-start sm:self-auto">
-                  Single file &bull; ready for AI analysis
+                  0:00 = clap &bull; both halves in sync
                 </span>
               </div>
 
@@ -1688,9 +1746,12 @@ export const SyncTrainingView: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-[#858585] leading-relaxed">
-                <strong className="text-[#242424]">Use as AI Model Input</strong> adds this merged
-                file to your sessions on the Upload page, where you place the pitch landmarks and
-                run detection on it exactly like any single-camera video.
+                Cut from {mergeJob.trim_start_a.toFixed(2)}s of Camera 1 and{' '}
+                {mergeJob.trim_start_b.toFixed(2)}s of Camera 2, so both halves start on the clap
+                and run on the same clock. <strong className="text-[#242424]">Use as AI Model
+                Input</strong> adds this merged file to your sessions on the Upload page, where you
+                place the pitch landmarks and run detection on it exactly like any single-camera
+                video.
               </p>
             </div>
           )}

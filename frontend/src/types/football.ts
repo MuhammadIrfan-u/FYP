@@ -480,6 +480,10 @@ export interface MergeJob {
   source_b: string;
   start_delay_a: number;
   start_delay_b: number;
+  /** Where each feed was cut so merged 0:00 is the shared sync moment. */
+  trim_start_a: number;
+  trim_start_b: number;
+  trim_to_overlap: boolean;
   merged_filename: string;
   relative_url: string | null;
   merged_video_url: string | null;
@@ -499,5 +503,16 @@ export interface SyncTrainingResult {
   sync_method: 'first_loudest_clap' | 'clap_transient' | 'cross_correlation' | 'default';
   confidence: number;
   message: string;
+  /** True when the two detected claps disagreed with the audio and were re-anchored. */
+  clap_corrected?: boolean;
+  alignment?: {
+    method: 'clap_confirmed' | 'clap_unverified' | 'audio_correlation' | 'clap_only' | 'default';
+    clap_trusted: boolean;
+    clap_corrected: boolean;
+    clap_offset: number | null;
+    clap_score: number;
+    audio_offset: number | null;
+    audio_score: number;
+  };
 }
 

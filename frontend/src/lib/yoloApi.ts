@@ -595,8 +595,11 @@ function normalizeMergeJob(job: MergeJob): MergeJob {
 export async function startSideBySideMerge(params: {
   videoAFilename: string;
   videoBFilename: string;
-  startDelayA?: number;
-  startDelayB?: number;
+  /** Sync point (clap time) inside each feed: the merge starts from there. */
+  trimStartA?: number;
+  trimStartB?: number;
+  /** End the merge when the first feed runs out, so both halves always show footage. */
+  trimToOverlap?: boolean;
   outputHeight?: number;
   title?: string;
 }): Promise<MergeJob> {
@@ -606,8 +609,9 @@ export async function startSideBySideMerge(params: {
     body: JSON.stringify({
       video_a_filename: params.videoAFilename,
       video_b_filename: params.videoBFilename,
-      start_delay_a: params.startDelayA ?? 0.0,
-      start_delay_b: params.startDelayB ?? 0.0,
+      trim_start_a: params.trimStartA ?? 0.0,
+      trim_start_b: params.trimStartB ?? 0.0,
+      trim_to_overlap: params.trimToOverlap ?? true,
       output_height: params.outputHeight ?? 1080,
       title: params.title,
     }),
