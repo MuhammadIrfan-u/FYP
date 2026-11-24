@@ -8,6 +8,7 @@ import type {
   DetectionBox,
   DetectionClass,
   MatchStats,
+  MergeJob,
   PitchLandmark,
   PlacedLandmark,
   PossessionState,
@@ -620,3 +621,69 @@ export async function renderSyncedVideo(params: {
   };
 }
 
+
+function normalizeMergeJob(job: MergeJob): MergeJob {
+  return {
+    ...job,
+    merged_video_url: job.relative_url
+      ? normalizeVideoUrl(job.relative_url)
+      : job.merged_video_url
+        ? normalizeVideoUrl(job.merged_video_url)
+        : null,
+  };
+}
+
+/**
+ * Starts the background merge of two clap-synchronized camera feeds into a single
+ * horizontal side-by-side MP4 (Camera 1 left, Camera 2 right).
+ */
+export async function startSideBySideMerge(params: {
+  videoAFilename: string;
+  videoBFilename: string;
+  /** Sync point (clap time) inside each feed: the merge starts from there. */
+  trimStartA?: number;
+  trimStartB?: number;
+  /** End the merge when the first feed runs out, so both halves always show footage. */
+  trimToOverlap?: boolean;
+  outputHeight?: number;
+  title?: string;
+}): Promise<MergeJob> {
+  const res = await fetch(`${YOLO_API_BASE}/api/merge-side-by-side`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      video_a_filename: params.videoAFilename,
+      video_b_filename: params.videoBFilename,
+      trim_start_a: params.trimStartA ?? 0.0,
+      trim_start_b: params.trimStartB ?? 0.0,
+      trim_to_overlap: params.trimToOverlap ?? true,
+      output_height: params.outputHeight ?? 1080,
+      title: params.title,
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Failed to start side-by-side merge (${res.status}): ${errorText}`);
+  }
+
+  return normalizeMergeJob(await res.json());
+}
+
+export async function getMergeJobStatus(jobId: string): Promise<MergeJob> {
+  const res = await fetch(`${YOLO_API_BASE}/api/merge-jobs/${jobId}`);
+  if (!res.ok) {
+    throw new Error(`Failed to read merge job status (${res.status}).`);
+  }
+  return normalizeMergeJob(await res.json());
+}
+
+/** Downloads a merged video from the backend and wraps it in a File for re-upload. */
+export async function fetchVideoAsFile(url: string, filename: string): Promise<File> {
+  const res = await fetch(normalizeVideoUrl(url));
+  if (!res.ok) {
+    throw new Error(`Could not download the merged video (${res.status}).`);
+  }
+  const blob = await res.blob();
+  return new File([blob], filename, { type: blob.type || 'video/mp4' });
+}

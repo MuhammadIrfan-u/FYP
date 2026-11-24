@@ -465,6 +465,32 @@ export interface SyncVideoChannel {
   waveform: number[];
 }
 
+/** Background job that merges Camera 1 + Camera 2 into one side-by-side MP4. */
+export interface MergeJob {
+  job_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  progress_percent: number;
+  processed_seconds: number;
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  size_bytes: number;
+  has_audio: boolean;
+  source_a: string;
+  source_b: string;
+  start_delay_a: number;
+  start_delay_b: number;
+  /** Where each feed was cut so merged 0:00 is the shared sync moment. */
+  trim_start_a: number;
+  trim_start_b: number;
+  trim_to_overlap: boolean;
+  merged_filename: string;
+  relative_url: string | null;
+  merged_video_url: string | null;
+  error: string | null;
+}
+
 export interface SyncTrainingResult {
   success: boolean;
   sync_id: string;
@@ -478,5 +504,16 @@ export interface SyncTrainingResult {
   sync_method: 'first_loudest_clap' | 'clap_transient' | 'cross_correlation' | 'default';
   confidence: number;
   message: string;
+  /** True when the two detected claps disagreed with the audio and were re-anchored. */
+  clap_corrected?: boolean;
+  alignment?: {
+    method: 'clap_confirmed' | 'clap_unverified' | 'audio_correlation' | 'clap_only' | 'default';
+    clap_trusted: boolean;
+    clap_corrected: boolean;
+    clap_offset: number | null;
+    clap_score: number;
+    audio_offset: number | null;
+    audio_score: number;
+  };
 }
 

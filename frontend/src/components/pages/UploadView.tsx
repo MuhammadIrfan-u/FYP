@@ -215,13 +215,14 @@ export const UploadView: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-[#242424]">Multi-Camera Training Synchronization</span>
+              <span className="text-xs font-bold text-[#242424]">Two Cameras? Sync &amp; Merge Them First</span>
               <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A] border border-[#BBF7D0]">
                 NEW FEATURE
               </span>
             </div>
             <p className="text-[11px] text-[#858585]">
-              Upload two camera angles (e.g. sideline and behind goal) with a clap sound to align them side-by-side.
+              Upload Camera 1 and Camera 2 (e.g. sideline and behind goal), align them on the clap sound,
+              then merge both into a single side-by-side video you can download and analyse here.
             </p>
           </div>
         </div>
@@ -229,7 +230,7 @@ export const UploadView: React.FC = () => {
           onClick={() => setActivePage('sync_training')}
           className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#262626] text-white hover:bg-[#383838] transition-all flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
         >
-          <span>Sync Training Videos</span>
+          <span>Sync &amp; Merge Cameras</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
