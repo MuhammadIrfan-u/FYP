@@ -37,6 +37,15 @@ interface AIChatMessage {
   suggestions?: string[];
 }
 
+export interface BackgroundSessionOptions {
+  /** Inference rate; lower it for long 4K full-field panoramas. */
+  inferFps?: number;
+  /** Only analyse the first N seconds of the video. */
+  maxDuration?: number;
+  /** Backend refuses to start without a saved landmark calibration (default true). */
+  requireCalibration?: boolean;
+}
+
 interface FootballContextType {
   activePage: PageId;
   setActivePage: (page: PageId) => void;
@@ -47,7 +56,7 @@ interface FootballContextType {
   uploadFootballVideo: (
     file: File,
     title?: string
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; video?: MatchVideo }>;
   deleteSession: (
     sessionId: string
   ) => Promise<{ success: boolean; error?: string }>;
@@ -81,7 +90,8 @@ interface FootballContextType {
   setAnalysisMode: (mode: 'live' | 'chunked') => void;
   startBackgroundSession: (
     video: MatchVideo,
-    customClassConfs?: Record<string, number>
+    customClassConfs?: Record<string, number>,
+    options?: BackgroundSessionOptions
   ) => Promise<BackgroundAnnotationJob | null>;
   activeVideoTab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw';
   setActiveVideoTab: (tab: 'overview' | 'tracking' | 'heatmap' | 'pass_network' | 'events' | 'raw') => void;
@@ -322,7 +332,7 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const uploadFootballVideo = async (
     file: File,
     title?: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; video?: MatchVideo }> => {
     if (isUploading) {
       return { success: false, error: 'An upload is already in progress.' };
     }
@@ -369,6 +379,14 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       } catch (backendErr) {
         console.warn('Local YOLO backend upload notice:', backendErr);
+        const msg = backendErr instanceof Error ? backendErr.message : '';
+        if (msg.includes('(422)')) {
+          // The backend could not decode the file (e.g. truncated MP4): stop here.
+          const err =
+            'This file is not a playable video (it looks incomplete or truncated). Re-export or re-cut it and upload again.';
+          showToast(err);
+          return { success: false, error: err };
+        }
       }
 
       setUploadProgress(65);
@@ -428,12 +446,10 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       setVideos((prev) => [newVideo, ...prev]);
       setActiveVideo(newVideo);
-      showToast(`"${sessionTitle}" uploaded! Loading Video Analysis...`);
+      showToast(`"${sessionTitle}" uploaded! Place the pitch landmarks to calibrate the field.`);
 
-      // Automatically transition to analysis page per workflow requirement
-      setActivePage('analysis');
-
-      return { success: true };
+      // Stay on the upload page: the pitch calibration (homography) step comes first.
+      return { success: true, video: newVideo };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown upload error occurred.';
       showToast(`Upload failed: ${msg}`);
@@ -542,7 +558,8 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Start background chunked video session (5-second progressive streams)
   const startBackgroundSession = async (
     video: MatchVideo,
-    customClassConfs?: Record<string, number>
+    customClassConfs?: Record<string, number>,
+    options?: BackgroundSessionOptions
   ): Promise<BackgroundAnnotationJob | null> => {
     const videoWithUrl: MatchVideo = { ...video };
 
@@ -590,6 +607,9 @@ export const FootballProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         confidenceThreshold: confidenceThreshold,
         classConfidences: effectiveConfs,
         burnBoxes: true,
+        inferFps: options?.inferFps ?? 15.0,
+        maxDuration: options?.maxDuration,
+        requireCalibration: options?.requireCalibration ?? true,
       });
 
       if (res && res.success) {

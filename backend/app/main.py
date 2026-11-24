@@ -10,12 +10,27 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ultralytics import YOLO
 
+from app.services.pitch_homography import (
+    DEFAULT_PITCH_LENGTH,
+    DEFAULT_PITCH_WIDTH,
+    PitchMapper,
+    build_mapper_from_landmarks,
+    landmark_definitions,
+    load_calibration,
+    save_calibration,
+)
+from app.services.team_possession import (
+    TeamPossessionTracker,
+    get_or_create_session_tracker,
+    reset_session_tracker,
+)
+from app.services.tiled_inference import WIDE_ASPECT, detect_frame
 from app.services.video_annotator import (
     create_annotation_job,
     get_job_status,
@@ -88,6 +103,30 @@ class FrameAnalysisRequest(BaseModel):
     image: str  # Base64 data URL or raw base64
     confidence_threshold: float | None = 0.25
     class_confidences: dict[str, float] | None = None
+    session_id: str | None = None
+    timestamp: float | None = None
+    reset_session: bool | None = False
+
+
+class PossessionResetRequest(BaseModel):
+    session_id: str
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _parse_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_detections(
@@ -199,6 +238,9 @@ async def analyze_frame(raw_request: Request):
     img_bgr = None
     confidence_threshold = 0.25
     class_confidences = None
+    session_id: str | None = None
+    frame_timestamp: float | None = None
+    reset_session = False
 
     content_type = raw_request.headers.get("content-type", "").lower()
 
@@ -210,6 +252,9 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            session_id = body.get("session_id") or None
+            frame_timestamp = _parse_optional_float(body.get("timestamp"))
+            reset_session = _parse_bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -228,6 +273,9 @@ async def analyze_frame(raw_request: Request):
             conf_field = form.get("confidence_threshold")
             if conf_field:
                 confidence_threshold = float(conf_field)
+            session_id = form.get("session_id") or None
+            frame_timestamp = _parse_optional_float(form.get("timestamp"))
+            reset_session = _parse_bool(form.get("reset_session"))
             cls_conf_field = form.get("class_confidences")
             if cls_conf_field:
                 try:
@@ -257,6 +305,9 @@ async def analyze_frame(raw_request: Request):
                 confidence_threshold = float(body.get("confidence_threshold"))
             if body.get("class_confidences"):
                 class_confidences = body.get("class_confidences")
+            session_id = body.get("session_id") or None
+            frame_timestamp = _parse_optional_float(body.get("timestamp"))
+            reset_session = _parse_bool(body.get("reset_session"))
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -290,6 +341,16 @@ async def analyze_frame(raw_request: Request):
         conf_threshold=confidence_threshold,
         class_confidences=class_confidences,
     )
+
+    # Team clustering + possession. Without a session_id, a throwaway tracker still
+    # labels teams for this single frame.
+    if session_id:
+        tracker = get_or_create_session_tracker(str(session_id), reset=reset_session)
+    else:
+        tracker = TeamPossessionTracker()
+    possession = tracker.process_frame(
+        img_bgr, parsed["detections"], timestamp=frame_timestamp
+    )
     elapsed_ms = round((time.time() - start_time) * 1000, 1)
 
     return {
@@ -298,7 +359,19 @@ async def analyze_frame(raw_request: Request):
         "class_counts": parsed["class_counts"],
         "total_detections": len(parsed["detections"]),
         "inference_time_ms": elapsed_ms,
+        "session_id": session_id,
+        "possession": possession,
     }
+
+
+@app.post("/api/possession/reset")
+def reset_possession_session(req: PossessionResetRequest):
+    """Clear team clusters, tracks and possession counters for a live session."""
+    existed = reset_session_tracker(req.session_id)
+    if not existed:
+        # Create a fresh tracker so the next frame starts clean either way.
+        get_or_create_session_tracker(req.session_id, reset=True)
+    return {"success": True, "session_id": req.session_id, "existed": existed}
 
 
 @app.post("/api/upload")
@@ -313,8 +386,21 @@ def upload_video(file: UploadFile = File(...)):  # noqa: B008
         with open(destination, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # Get video metadata with OpenCV
+        # Get video metadata with OpenCV; reject files that cannot be decoded
+        # (e.g. truncated MP4s without a moov atom) instead of failing later.
         cap = cv2.VideoCapture(str(destination))
+        readable = cap.isOpened() and cap.read()[0]
+        if not readable:
+            cap.release()
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The uploaded file is not a playable video (it may be incomplete or "
+                    "truncated, e.g. 'moov atom not found'). Re-export or re-cut it and "
+                    "upload again."
+                ),
+            )
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
         duration_sec = round(frame_count / fps, 2) if fps > 0 else 0.0
@@ -333,6 +419,8 @@ def upload_video(file: UploadFile = File(...)):  # noqa: B008
             "resolution": f"{width}x{height}",
             "size_bytes": destination.stat().st_size,
         }
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Video upload failed: {e!s}")
 
@@ -341,11 +429,15 @@ def upload_video(file: UploadFile = File(...)):  # noqa: B008
 def analyze_video(
     file: UploadFile | None = File(None),  # noqa: B008
     video_filename: str | None = Form(None),
-    sample_fps: float = Form(2.0),
+    sample_fps: float = Form(10.0),
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
 ):
-    """Analyze a football video file by sampling frames at specified rate with optional per-class confidence thresholds"""
+    """Analyze a football video by sampling frames (default 10 fps) with per-class thresholds.
+
+    Each timeline entry carries the per-frame team/possession state, and the response
+    includes an overall ``possession_summary``.
+    """
     if not MODEL_LOADED or model is None:
         raise HTTPException(status_code=500, detail="YOLO model is not initialized.")
 
@@ -387,8 +479,10 @@ def analyze_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration_sec = total_frames / video_fps if video_fps > 0 else 0.0
 
-    # Calculate step in frames
+    # Calculate step in frames (dense sampling so passes/turnovers are not skipped)
+    sample_fps = max(0.1, float(sample_fps or 10.0))
     step_frames = max(1, round(video_fps / sample_fps))
+    possession_tracker = TeamPossessionTracker()
 
     timeline = {}
     aggregated_counts = {
@@ -425,10 +519,15 @@ def analyze_video(
                 class_confidences=parsed_class_confidences,
             )
 
+            frame_possession = possession_tracker.process_frame(
+                frame, parsed["detections"], timestamp=timestamp
+            )
+
             timeline[f"{timestamp:.2f}"] = {
                 "timestamp": timestamp,
                 "detections": parsed["detections"],
                 "counts": parsed["class_counts"],
+                "possession": frame_possession,
             }
 
             for k, v in parsed["class_counts"].items():
@@ -457,7 +556,171 @@ def analyze_video(
         "timeline": timeline,
         "peak_class_counts": max_counts,
         "avg_class_counts": avg_counts,
+        "sample_fps": sample_fps,
+        "frame_step": step_frames,
+        "possession_summary": possession_tracker.get_summary(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Pitch calibration (drag-and-drop landmarks -> homography view)
+# ---------------------------------------------------------------------------
+
+
+def calibrations_dir() -> Path:
+    return UPLOADS_DIR / "calibrations"
+
+
+def _resolve_local_video(video_filename: str) -> Path | None:
+    name = Path(video_filename).name  # no path traversal
+    for c in (
+        UPLOADS_DIR / name,
+        ASSETS_DIR / name,
+        BASE_DIR.parent / name,
+        BASE_DIR.parent / "frontend" / "public" / name,
+    ):
+        if c.exists() and c.is_file():
+            return c
+    return None
+
+
+class LandmarkPoint(BaseModel):
+    id: str
+    x: float  # image pixels in the calibration frame
+    y: float
+    pitch_x: float | None = None  # optional custom landmark (metres)
+    pitch_y: float | None = None
+
+
+class HomographyRequest(BaseModel):
+    video_filename: str
+    image_width: int = Field(gt=0)
+    image_height: int = Field(gt=0)
+    pitch_length: float = Field(DEFAULT_PITCH_LENGTH, gt=20, le=130)
+    pitch_width: float = Field(DEFAULT_PITCH_WIDTH, gt=15, le=100)
+    points: list[LandmarkPoint]
+    save: bool = True
+
+
+def _calibration_response(mapper: PitchMapper, saved: bool) -> dict[str, Any]:
+    quality = mapper.quality()
+    warnings = []
+    if quality["points"] < 6:
+        warnings.append(
+            "Only 4-5 landmarks: a plain homography is used. Add 6+ spread-out "
+            "landmarks so lens/panorama curvature can be corrected."
+        )
+    if quality["loo_rmse_m"] is not None and quality["loo_rmse_m"] > 3.0:
+        warnings.append(
+            f"Landmark consistency is low (leave-one-out error {quality['loo_rmse_m']} m). "
+            "Check that each landmark sits on the right pitch marking."
+        )
+    return {
+        "success": True,
+        "saved": saved,
+        "calibration": mapper.to_dict(),
+        "quality": quality,
+        "overlay_lines": mapper.overlay_lines_pct(),
+        "warnings": warnings,
+    }
+
+
+@app.get("/api/pitch/landmarks")
+def get_pitch_landmarks(
+    length: float = DEFAULT_PITCH_LENGTH, width: float = DEFAULT_PITCH_WIDTH
+):
+    """Named pitch landmarks (metres) the user can drag onto the frame."""
+    return {
+        "pitch_length": length,
+        "pitch_width": width,
+        "landmarks": landmark_definitions(length, width),
+        "min_points": 4,
+        "recommended_points": 8,
+    }
+
+
+@app.get("/api/video-frame")
+def get_video_frame(video_filename: str, t: float = 1.0, max_width: int = 4096):
+    """JPEG frame of an uploaded video, used as the calibration canvas."""
+    path = _resolve_local_video(video_filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Video not found.")
+    cap = cv2.VideoCapture(str(path))
+    try:
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Failed to open video file.")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        frame_no = max(0, round(max(0.0, t) * fps))
+        if total > 0:
+            frame_no = min(frame_no, total - 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            raise HTTPException(status_code=400, detail="Could not read frame.")
+    finally:
+        cap.release()
+    h, w = frame.shape[:2]
+    if w > max_width > 0:
+        frame = cv2.resize(frame, (max_width, round(h * max_width / w)))
+    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Could not encode frame.")
+    return Response(
+        content=buf.tobytes(),
+        media_type="image/jpeg",
+        headers={
+            "X-Video-Width": str(w),
+            "X-Video-Height": str(h),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/api/homography")
+def compute_homography(req: HomographyRequest):
+    """Fit (and save) the image -> pitch mapping from the placed landmarks."""
+    try:
+        mapper = build_mapper_from_landmarks(
+            [p.model_dump(exclude_none=True) for p in req.points],
+            req.image_width,
+            req.image_height,
+            req.pitch_length,
+            req.pitch_width,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if req.save:
+        save_calibration(calibrations_dir(), req.video_filename, mapper)
+    return _calibration_response(mapper, saved=req.save)
+
+
+@app.get("/api/homography")
+def get_homography(video_filename: str):
+    mapper = load_calibration(calibrations_dir(), video_filename)
+    if mapper is None:
+        raise HTTPException(status_code=404, detail="No calibration for this video.")
+    return _calibration_response(mapper, saved=True)
+
+
+def _make_detect_fn(confidence_threshold: float, class_confidences: dict[str, float]):
+    """Tiled inference for wide (full-field panorama) frames, classic path otherwise."""
+    min_conf = min([confidence_threshold, *class_confidences.values()])
+
+    def detect(frame: np.ndarray) -> dict[str, Any]:
+        h, w = frame.shape[:2]
+        if h > 0 and w / h > WIDE_ASPECT:
+            return detect_frame(
+                model, frame, confidence_threshold, class_confidences, imgsz=480
+            )
+        results = model(frame, imgsz=480, conf=min_conf, verbose=False)
+        return parse_detections(
+            results,
+            conf_threshold=confidence_threshold,
+            class_confidences=class_confidences,
+        )
+
+    return detect
 
 
 @app.post("/api/background-annotate")
@@ -469,6 +732,10 @@ def start_background_annotation(
     confidence_threshold: float = Form(0.25),
     class_confidences: str | None = Form(None),
     burn_boxes: bool = Form(True),
+    infer_fps: float = Form(15.0),
+    homography: str | None = Form(None),
+    require_calibration: bool = Form(False),
+    max_duration: float | None = Form(None),
 ):
     """
     Launches a background video inference and annotation job that segments big videos
@@ -596,7 +863,26 @@ def start_background_annotation(
                 detail="Provide a valid video file, video_filename, or video_url.",
             )
 
-    # 3. Create job and start background progressive processing
+    # 3. Pitch calibration: explicit payload, else the one saved for this video.
+    pitch_mapper: PitchMapper | None = None
+    if homography:
+        try:
+            pitch_mapper = PitchMapper.from_dict(json.loads(homography))
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+            raise HTTPException(status_code=422, detail=f"Invalid homography: {e!s}")
+    else:
+        for name in (target_video_path.name, video_filename):
+            if name:
+                pitch_mapper = load_calibration(calibrations_dir(), name)
+                if pitch_mapper is not None:
+                    break
+    if require_calibration and pitch_mapper is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Pitch calibration required: place the field landmarks first.",
+        )
+
+    # 4. Create job and start background progressive processing
     job = create_annotation_job(
         video_source_path=target_video_path,
         uploads_dir=UPLOADS_DIR,
@@ -606,6 +892,10 @@ def start_background_annotation(
         burn_boxes=burn_boxes,
         parse_detections_fn=parse_detections,
         model_obj=model,
+        infer_fps=infer_fps,
+        detect_fn=_make_detect_fn(confidence_threshold, parsed_class_confidences),
+        pitch_mapper=pitch_mapper,
+        max_duration_sec=max_duration,
     )
 
     return {
@@ -614,6 +904,8 @@ def start_background_annotation(
         "status": job["status"],
         "chunk_duration": chunk_duration,
         "class_confidences": job["class_confidences"],
+        "infer_fps": job["infer_fps"],
+        "calibrated": pitch_mapper is not None,
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }
 

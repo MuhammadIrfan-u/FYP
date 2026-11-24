@@ -33,8 +33,18 @@ dist/
 # Uploads & temporary generated media
 backend/uploads/jobs/
 backend/uploads/sync_sessions/
+backend/uploads/calibrations/
 backend/uploads/*.mp4
+*.mp4
+*.MOV
+*.mov
+*.avi
+*.mkv
 !backend/uploads/Generate_a_simple_football_vid_49cfdf04.mp4
+
+# External datasets & scratch scripts
+SoccerTrack-v2/
+compress_video.py
 
 # OS generated files
 .DS_Store

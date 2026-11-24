@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
+import { PitchCalibrationModal } from '@/components/common/PitchCalibrationModal';
 import { MatchVideo } from '@/types/football';
 
 export const UploadView: React.FC = () => {
@@ -56,6 +57,11 @@ export const UploadView: React.FC = () => {
     'player with ball': 0.25,
   });
   const [isStartingStream, setIsStartingStream] = useState<boolean>(false);
+  // Step 1: drag-and-drop pitch landmarks (homography) before any analysis starts.
+  const [calibrationVideo, setCalibrationVideo] = useState<MatchVideo | null>(null);
+  const [calibrationSummary, setCalibrationSummary] = useState<string | null>(null);
+  const [modalInferFps, setModalInferFps] = useState<number>(5);
+  const [modalMaxMinutes, setModalMaxMinutes] = useState<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,7 +127,10 @@ export const UploadView: React.FC = () => {
 
     const res = await uploadFootballVideo(selectedFile, sessionTitle);
     if (res.success) {
-      setSuccessNotice(`"${sessionTitle || selectedFile.name}" was uploaded successfully.`);
+      setSuccessNotice(
+        `"${sessionTitle || selectedFile.name}" was uploaded. Next: place the pitch landmarks to calibrate the full-field view.`
+      );
+      if (res.video) setCalibrationVideo(res.video);
       setSelectedFile(null);
       setSessionTitle('');
       if (fileInputRef.current) {
@@ -158,7 +167,11 @@ export const UploadView: React.FC = () => {
     if (!modalVideo) return;
     setIsStartingStream(true);
     setConfidenceThreshold(modalGlobalConf);
-    await startBackgroundSession(modalVideo, modalClassConfs);
+    await startBackgroundSession(modalVideo, modalClassConfs, {
+      inferFps: modalInferFps,
+      maxDuration: modalMaxMinutes > 0 ? modalMaxMinutes * 60 : undefined,
+      requireCalibration: true,
+    });
     setIsStartingStream(false);
     setModalVideo(null);
   };
@@ -448,7 +461,7 @@ export const UploadView: React.FC = () => {
 
                     {/* Background 5s Chunked Video Inference */}
                     <button
-                      onClick={() => handleOpenAnnotateModal(vid)}
+                      onClick={() => setCalibrationVideo(vid)}
                       className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all bg-[#16A34A] hover:bg-[#15803D] text-white shadow-2xs cursor-pointer"
                       title="Break video into 5-second subvideos, annotate in background, and stream progressively so you don't get bored"
                     >
@@ -496,11 +509,53 @@ export const UploadView: React.FC = () => {
                 <span>5-Second Progressive Video Engine</span>
               </div>
               <h3 className="text-xl font-black text-[#242424] tracking-tight">
-                Background Video Annotation
+                Step 2 of 2 · Background Video Annotation
               </h3>
               <p className="text-xs text-[#858585] mt-1">
                 Target session: <strong className="text-[#242424]">{modalVideo.matchName}</strong> ({modalVideo.filename})
               </p>
+            </div>
+
+            {calibrationSummary && (
+              <div className="p-3 rounded-2xl bg-[#FEFCE8] border border-[#FDE68A] text-xs text-[#854D0E] flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#16A34A] shrink-0" />
+                <span>
+                  <strong>Step 1 done:</strong> {calibrationSummary}. Players and ball will be mapped onto the
+                  pitch for possession, passes and goals.
+                </span>
+              </div>
+            )}
+
+            {/* Full-field processing options */}
+            <div className="p-4 rounded-2xl bg-white border border-[#E8E3D8] grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <label className="space-y-1">
+                <span className="font-bold text-[#242424]">Inference rate</span>
+                <select
+                  value={modalInferFps}
+                  onChange={(e) => setModalInferFps(parseFloat(e.target.value))}
+                  className="w-full px-2 py-1.5 rounded-lg bg-[#FAF8F4] border border-[#E8E3D8]"
+                >
+                  <option value={3}>3 fps (fastest, long 4K matches)</option>
+                  <option value={5}>5 fps (recommended for full-field panoramas)</option>
+                  <option value={10}>10 fps</option>
+                  <option value={15}>15 fps (most accurate, slowest)</option>
+                </select>
+                <span className="block text-[10px] text-[#858585]">
+                  Wide full-field frames are split into tiles, so each sample costs several model passes.
+                </span>
+              </label>
+              <label className="space-y-1">
+                <span className="font-bold text-[#242424]">Analyse first (minutes)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={modalMaxMinutes}
+                  onChange={(e) => setModalMaxMinutes(Math.max(0, parseFloat(e.target.value) || 0))}
+                  className="w-full px-2 py-1.5 rounded-lg bg-[#FAF8F4] border border-[#E8E3D8] font-mono"
+                />
+                <span className="block text-[10px] text-[#858585]">0 = whole video.</span>
+              </label>
             </div>
 
             {/* Concept callout */}
@@ -692,6 +747,24 @@ export const UploadView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Step 1: pitch landmark calibration (homography) — always before analysis starts */}
+      {calibrationVideo && (
+        <PitchCalibrationModal
+          video={calibrationVideo}
+          onClose={() => setCalibrationVideo(null)}
+          continueLabel="Save & continue to step 2"
+          onCalibrated={(result) => {
+            const target = calibrationVideo;
+            setCalibrationVideo(null);
+            setCalibrationSummary(
+              `${result.quality.points} landmarks, ${result.quality.model}` +
+                (result.quality.loo_rmse_m != null ? `, ±${result.quality.loo_rmse_m} m` : '')
+            );
+            handleOpenAnnotateModal(target);
+          }}
+        />
       )}
     </div>
   );

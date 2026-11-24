@@ -31,6 +31,260 @@ export interface DetectionBox {
   team?: 'Blue' | 'Red' | 'Ref';
   speed?: string;
   trail?: Array<[number, number]>;
+  /** 1 or 2 for the clustered teams, 0 for an outlier (GK/referee), null if unknown. */
+  teamId?: number | null;
+  teamLabel?: string;
+  teamColorHex?: string | null;
+  teamColorName?: string | null;
+  jerseyColorHex?: string | null;
+  /** Persistent tracker ID (#1, #2, ...) across frames. */
+  trackId?: number | null;
+  hasBall?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Team clustering & ball possession (backend: app/services/team_possession.py)
+// ---------------------------------------------------------------------------
+
+export type PossessionStatus = 'idle' | 'holding' | 'not_lost' | 'lost' | 'in_transit';
+
+export interface TeamClusterInfo {
+  team_id: 1 | 2;
+  label: string;
+  color_hex: string | null;
+  color_name: string | null;
+  lab: number[] | null;
+  player_count: number;
+  frames_held: number;
+  possession_percent: number;
+  losses: number;
+  passes: number;
+}
+
+export interface PossessionCarrier {
+  track_id: number | null;
+  team_id: number | null;
+  team_label: string;
+  team_color_hex: string | null;
+  detection_id?: string | null;
+  confidence?: number | null;
+}
+
+export interface PossessionEventItem {
+  id: string;
+  frame_index: number;
+  timestamp: number | null;
+  status: 'lost' | 'not_lost';
+  possession_lost: boolean;
+  from_player_id: number | null;
+  from_team: number | null;
+  to_player_id: number | null;
+  to_team: number | null;
+  description: string;
+}
+
+export interface PossessionPercent {
+  team_1: number;
+  team_2: number;
+}
+
+/** Per-frame possession state returned with each analyzed frame. */
+export interface PossessionState {
+  frame_index: number;
+  timestamp: number | null;
+  status: PossessionStatus;
+  possession_status: PossessionStatus;
+  possession_lost: boolean;
+  carrier: PossessionCarrier | null;
+  prev_player_id: number | null;
+  prev_team: number | null;
+  curr_player_id: number | null;
+  curr_team: number | null;
+  event: PossessionEventItem | null;
+  teams: TeamClusterInfo[];
+  possession_percent: PossessionPercent;
+  total_losses: number;
+  total_passes: number;
+  teams_ready: boolean;
+}
+
+/** Cumulative possession for a whole clip / session / background job. */
+export interface PossessionSummary {
+  teams: TeamClusterInfo[];
+  possession_percent: PossessionPercent;
+  total_losses: number;
+  total_passes: number;
+  losses: Record<string, number>;
+  passes: Record<string, number>;
+  events: PossessionEventItem[];
+  frames_processed: number;
+  frames_with_carrier: number;
+  current_status: PossessionStatus;
+  current_carrier: PossessionCarrier | null;
+  teams_ready: boolean;
+  active_tracks: number;
+}
+
+/* ---------- Pitch calibration (homography view) ---------- */
+
+export interface PitchLandmark {
+  id: string;
+  label: string;
+  group: 'corners' | 'centre' | 'left' | 'right' | string;
+  /** Pitch coordinates in metres (x along length, y from far touchline). */
+  x: number;
+  y: number;
+}
+
+/** A landmark placed on the frame, in source-video pixels. */
+export interface PlacedLandmark {
+  id: string;
+  x: number;
+  y: number;
+}
+
+export interface CalibrationQuality {
+  points: number;
+  model: 'homography' | 'homography+tps';
+  homography_rmse_m: number;
+  loo_rmse_m: number | null;
+  per_point: { id: string; homography_error_m: number; loo_error_m: number | null }[];
+}
+
+export interface PitchCalibration {
+  version: number;
+  image_width: number;
+  image_height: number;
+  pitch_length: number;
+  pitch_width: number;
+  use_tps: boolean;
+  homography: number[][];
+  points: { id: string; image: [number, number]; pitch: [number, number] }[];
+}
+
+export interface CalibrationResult {
+  success: boolean;
+  saved: boolean;
+  calibration: PitchCalibration;
+  quality: CalibrationQuality;
+  /** Projected pitch markings, polylines of [x%, y%] in frame coordinates. */
+  overlay_lines: [number, number][][];
+  warnings: string[];
+}
+
+/* ---------- Pitch-space match analytics ---------- */
+
+export type MatchEventType = 'pass' | 'interception' | 'tackle' | 'goal' | 'out';
+
+export interface MatchAnalyticsEvent {
+  id: string;
+  type: MatchEventType;
+  timestamp: number;
+  team?: number | null;
+  from_player?: number;
+  to_player?: number;
+  from_team?: number;
+  distance_m?: number;
+  scorer?: number | null;
+  own_goal?: boolean;
+  goal_side?: 'left' | 'right';
+  restart?: 'throw_in' | 'corner' | 'goal_kick';
+  score?: { team_1: number; team_2: number };
+  start?: [number, number];
+  end?: [number, number];
+  description: string;
+}
+
+export interface MatchTeamStats {
+  team_id: number;
+  possession_percent: number;
+  possession_sec: number;
+  control_sec: number;
+  passes_completed: number;
+  passes_attempted: number;
+  pass_accuracy: number | null;
+  interceptions: number;
+  tackles: number;
+  turnovers: number;
+  goals: number;
+  distance_km: number;
+  mean_x_m: number | null;
+  shape: TeamShape | null;
+}
+
+/** Average team shape (outfield block, extreme player at each end excluded). */
+export interface TeamShape {
+  samples: number;
+  avg_width_m: number;
+  avg_depth_m: number;
+  avg_centroid: [number, number];
+  defending_side: 'left' | 'right' | null;
+  attacking_direction: 'left' | 'right' | null;
+  /** Distance of the last outfield line from the team's own goal line. */
+  defensive_line_height_m: number | null;
+}
+
+export type HeatmapPhase = 'all' | 'in_possession' | 'out_of_possession';
+
+/** Tactical heatmaps written to heatmaps.json ([row = y cell][col = x cell]). */
+export interface TacticalHeatmaps {
+  cell_m: number;
+  nx: number;
+  ny: number;
+  pitch: { length: number; width: number };
+  teams: { team_1: Record<HeatmapPhase, number[][]>; team_2: Record<HeatmapPhase, number[][]> };
+  ball: number[][];
+  players: Record<
+    string,
+    {
+      track_id: number;
+      team: number | null;
+      samples: number;
+      avg_position: [number, number];
+      /** Sparse cells: [x cell, y cell, count]. */
+      cells: [number, number, number][];
+    }
+  >;
+  shape: { team_1: TeamShape | null; team_2: TeamShape | null };
+}
+
+export interface MatchPlayerStats {
+  track_id: number;
+  team: number | null;
+  samples: number;
+  distance_m: number;
+  max_speed_kmh: number;
+  avg_x_m: number;
+  avg_y_m: number;
+  touches: number;
+  passes_completed: number;
+  passes_received: number;
+  turnovers: number;
+  possession_sec: number;
+  goals: number;
+}
+
+export interface MatchStats {
+  calibrated: boolean;
+  pitch: { length: number; width: number };
+  duration_analyzed_sec: number;
+  samples: number;
+  score: { team_1: number; team_2: number };
+  possession_percent: PossessionPercent;
+  teams: { team_1: MatchTeamStats; team_2: MatchTeamStats };
+  attacking: { team_defending_left_goal: number | null; team_defending_right_goal: number | null };
+  ball: {
+    samples: number;
+    detected_percent: number;
+    distance_m: number;
+    in_play: boolean;
+    last_position: [number, number] | null;
+  };
+  event_counts: Partial<Record<MatchEventType, number>>;
+  goals: MatchAnalyticsEvent[];
+  events: MatchAnalyticsEvent[];
+  players: MatchPlayerStats[];
+  pass_network: { from: number; to: number; count: number }[];
 }
 
 export type VideoStatus = 'Uploading' | 'Processing' | 'Analysing' | 'Completed' | 'Failed' | 'Uploaded';
