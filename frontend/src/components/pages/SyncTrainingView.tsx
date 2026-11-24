@@ -876,6 +876,19 @@ export const SyncTrainingView: React.FC = () => {
                   </span>
                 </div>
               )}
+
+              {/* Weak audio match: tell the user to verify instead of trusting it */}
+              {syncResult.confidence < 0.75 && (
+                <div className="mt-1.5 p-2 rounded-xl bg-[#FEF2F2] border border-[#FECACA] text-[11px] text-[#991B1B] flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#DC2626]" />
+                  <span>
+                    <strong>Low-confidence sync ({Math.round(syncResult.confidence * 100)}%).</strong>{' '}
+                    The two soundtracks have little in common &mdash; quiet or noisy audio, or
+                    cameras too far apart to hear the same sounds. Verify the playback and set the
+                    claps yourself with the 👏 pins before merging.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Quick Jump to Clap Button */}
