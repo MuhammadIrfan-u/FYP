@@ -1,6 +1,6 @@
 import io
 
-from app import main
+from app import main, model_config
 
 
 def test_analyze_frame_json_raw_base64_success(client, sample_base64_image):
@@ -95,4 +95,5 @@ def test_analyze_frame_custom_confidence_threshold_forwarded(
     configured_mock_model.assert_called()
     _, kwargs = configured_mock_model.call_args
     assert kwargs.get("conf") == 0.65
-    assert kwargs.get("imgsz") == 480
+    # Inference runs at the size the model was trained on.
+    assert kwargs.get("imgsz") == model_config.INFER_IMGSZ

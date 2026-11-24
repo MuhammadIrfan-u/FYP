@@ -2,6 +2,7 @@ export type PageId =
   | 'dashboard'
   | 'upload'
   | 'analysis'
+  | 'passes'
   | 'sync_training'
   | 'events'
   | 'reports'

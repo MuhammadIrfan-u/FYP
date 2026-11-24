@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from ultralytics import YOLO
 
+from app import model_config
 from app.services.pitch_homography import (
     DEFAULT_PITCH_LENGTH,
     DEFAULT_PITCH_WIDTH,
@@ -49,8 +50,8 @@ torch.set_num_threads(4)
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 ASSETS_DIR = BASE_DIR / "assets"
-MODEL_PATH = ASSETS_DIR / "best_5.pt"
-ONNX_PATH = ASSETS_DIR / "best_5.onnx"
+MODEL_PATH = ASSETS_DIR / model_config.MODEL_FILENAMES[0]
+INFER_IMGSZ = model_config.INFER_IMGSZ
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 SYNC_DIR = UPLOADS_DIR / "sync_sessions"
@@ -59,7 +60,7 @@ SYNC_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="FootballCoach PRO - YOLO Analytics Engine",
     version="1.0.0",
-    description="Real-time tactical football video analysis using trained YOLO model best_5.pt",
+    description="Real-time tactical football video analysis using a trained YOLO detection model",
 )
 
 # Enable CORS for frontend
@@ -74,9 +75,13 @@ app.add_middleware(
 # Serve uploaded videos
 app.mount("/api/videos", StaticFiles(directory=str(UPLOADS_DIR)), name="videos")
 
-# Load YOLO model (prefer optimized ONNX Runtime model if available, fallback to PyTorch .pt)
-target_model_path = ONNX_PATH if ONNX_PATH.exists() else MODEL_PATH
-print(f"Loading YOLO model from: {target_model_path}")
+# Load the detection model: the first candidate present on disk wins, so the
+# older best_5 weights still work if the current model is missing.
+target_model_path = next(
+    (p for p in (ASSETS_DIR / n for n in model_config.MODEL_FILENAMES) if p.exists()),
+    MODEL_PATH,
+)
+print(f"Loading YOLO model from: {target_model_path} (imgsz {INFER_IMGSZ})")
 try:
     if not target_model_path.exists():
         raise FileNotFoundError(f"Model file not found at {target_model_path}")
@@ -91,12 +96,7 @@ except Exception as e:  # noqa: BLE001
     print(f"Failed to load YOLO model: {e}")
     model = None
     MODEL_LOADED = False
-    MODEL_CLASSES = {
-        0: "football",
-        1: "football goal",
-        2: "player",
-        3: "player with ball",
-    }
+    MODEL_CLASSES = dict(model_config.FALLBACK_CLASS_NAMES)
 
 
 class FrameAnalysisRequest(BaseModel):
@@ -135,12 +135,7 @@ def parse_detections(
     class_confidences: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     detections = []
-    class_counts = {
-        "player": 0,
-        "football": 0,
-        "football goal": 0,
-        "player with ball": 0,
-    }
+    class_counts = model_config.empty_class_counts()
 
     if not results or len(results) == 0:
         return {"detections": detections, "class_counts": class_counts}
@@ -215,7 +210,7 @@ def root():
 def get_model_info():
     return {
         "status": "ready" if MODEL_LOADED else "error",
-        "model_file": target_model_path.name if target_model_path else "best_5.pt",
+        "model_file": target_model_path.name if target_model_path else "unknown",
         "format": "onnx"
         if target_model_path and target_model_path.suffix == ".onnx"
         else "pytorch",
@@ -227,7 +222,7 @@ def get_model_info():
 @app.post("/api/analyze-frame")
 async def analyze_frame(raw_request: Request):
     """
-    Analyzes a video frame image using the trained YOLO model best_5.pt.
+    Analyzes a video frame image using the trained YOLO detection model.
     Seamlessly parses JSON payload { image: base64, confidence_threshold: 0.25 }
     or multipart/form-data.
     """
@@ -334,8 +329,8 @@ async def analyze_frame(raw_request: Request):
         except (ValueError, TypeError):
             min_conf = confidence_threshold
 
-    # Run YOLO inference with optimized input resolution (imgsz=480 for realtime speed)
-    results = model(img_bgr, imgsz=480, conf=min_conf, verbose=False)
+    # Run YOLO inference with optimized input resolution (imgsz=INFER_IMGSZ for realtime speed)
+    results = model(img_bgr, imgsz=INFER_IMGSZ, conf=min_conf, verbose=False)
     parsed = parse_detections(
         results,
         conf_threshold=confidence_threshold,
@@ -485,13 +480,8 @@ def analyze_video(
     possession_tracker = TeamPossessionTracker()
 
     timeline = {}
-    aggregated_counts = {
-        "player": 0,
-        "football": 0,
-        "football goal": 0,
-        "player with ball": 0,
-    }
-    max_counts = {"player": 0, "football": 0, "football goal": 0, "player with ball": 0}
+    aggregated_counts = model_config.empty_class_counts()
+    max_counts = model_config.empty_class_counts()
     frames_analyzed = 0
     curr_frame_idx = 0
 
@@ -512,7 +502,7 @@ def analyze_video(
 
         if curr_frame_idx % step_frames == 0:
             timestamp = round(curr_frame_idx / video_fps, 2)
-            results = model(frame, imgsz=480, conf=min_conf, verbose=False)
+            results = model(frame, imgsz=INFER_IMGSZ, conf=min_conf, verbose=False)
             parsed = parse_detections(
                 results,
                 conf_threshold=confidence_threshold,
@@ -711,9 +701,9 @@ def _make_detect_fn(confidence_threshold: float, class_confidences: dict[str, fl
         h, w = frame.shape[:2]
         if h > 0 and w / h > WIDE_ASPECT:
             return detect_frame(
-                model, frame, confidence_threshold, class_confidences, imgsz=480
+                model, frame, confidence_threshold, class_confidences, imgsz=INFER_IMGSZ
             )
-        results = model(frame, imgsz=480, conf=min_conf, verbose=False)
+        results = model(frame, imgsz=INFER_IMGSZ, conf=min_conf, verbose=False)
         return parse_detections(
             results,
             conf_threshold=confidence_threshold,
@@ -736,6 +726,7 @@ def start_background_annotation(
     homography: str | None = Form(None),
     require_calibration: bool = Form(False),
     max_duration: float | None = Form(None),
+    passes_only: bool = Form(False),
 ):
     """
     Launches a background video inference and annotation job that segments big videos
@@ -746,12 +737,7 @@ def start_background_annotation(
         raise HTTPException(status_code=500, detail="YOLO model is not initialized.")
 
     # 1. Parse class confidences (e.g. {"football goal": 0.35, "football": 0.30})
-    parsed_class_confidences = {
-        "football goal": 0.35,
-        "football": 0.30,
-        "player": 0.25,
-        "player with ball": 0.25,
-    }
+    parsed_class_confidences = dict(model_config.DEFAULT_CLASS_CONFIDENCES)
     if class_confidences:
         try:
             custom_confs = (
@@ -806,7 +792,8 @@ def start_background_annotation(
                     target_video_path = f
                     break
 
-    # Remote URL download (e.g. Supabase storage signed URL)
+    # Remote video (e.g. Supabase storage signed URL) - fetched by the worker.
+    remote_url: str | None = None
     if (
         not target_video_path
         and video_url
@@ -821,19 +808,19 @@ def start_background_annotation(
         elif not video_url.startswith("http://127.0.0.1") and not video_url.startswith(
             "http://localhost"
         ):
-            try:
-                import urllib.request
+            # Deliberately NOT downloaded here. Pulling tens of megabytes from
+            # Supabase inside the request holds the HTTP response open for the
+            # whole transfer, and the browser gives up first - which reaches the
+            # user as "Failed to fetch", and only for sessions that have no
+            # local copy. The worker fetches it, so this endpoint answers at once.
+            remote_url = video_url
 
-                temp_name = f"remote_{uuid.uuid4().hex[:8]}.mp4"
-                temp_path = UPLOADS_DIR / temp_name
-                urllib.request.urlretrieve(video_url, str(temp_path))
-                if temp_path.exists() and temp_path.stat().st_size > 0:
-                    target_video_path = temp_path
-            except Exception as dl_err:  # noqa: BLE001
-                logger.warning(f"Could not download remote video URL: {dl_err}")
-
-    # Fallback to most recently uploaded session video in UPLOADS_DIR
-    if not target_video_path:
+    # Fallback to most recently uploaded session video in UPLOADS_DIR.
+    # Not used when a remote URL was given: analysing an unrelated video is far
+    # worse than reporting that the session's own video could not be fetched,
+    # because the results look perfectly valid but belong to another match.
+    substituted_video = False
+    if not target_video_path and not remote_url:
         uploaded_videos = sorted(
             [
                 f
@@ -847,11 +834,13 @@ def start_background_annotation(
         )
         if uploaded_videos:
             target_video_path = uploaded_videos[0]
-            logger.info(
-                f"Targeting most recently uploaded user video: {target_video_path.name}"
+            substituted_video = True
+            logger.warning(
+                f"No match for '{video_filename}'; falling back to the most "
+                f"recent upload: {target_video_path.name}"
             )
 
-    if not target_video_path or not target_video_path.exists():
+    if not remote_url and (not target_video_path or not target_video_path.exists()):
         demo_candidate = (
             BASE_DIR.parent / "frontend" / "public" / "football_match_demo.mp4"
         )
@@ -871,7 +860,11 @@ def start_background_annotation(
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
             raise HTTPException(status_code=422, detail=f"Invalid homography: {e!s}")
     else:
-        for name in (target_video_path.name, video_filename):
+        known_names = (
+            target_video_path.name if target_video_path else None,
+            video_filename,
+        )
+        for name in known_names:
             if name:
                 pitch_mapper = load_calibration(calibrations_dir(), name)
                 if pitch_mapper is not None:
@@ -885,6 +878,8 @@ def start_background_annotation(
     # 4. Create job and start background progressive processing
     job = create_annotation_job(
         video_source_path=target_video_path,
+        remote_video_url=remote_url,
+        substituted_video=substituted_video,
         uploads_dir=UPLOADS_DIR,
         chunk_duration_sec=chunk_duration,
         confidence_threshold=confidence_threshold,
@@ -896,6 +891,7 @@ def start_background_annotation(
         detect_fn=_make_detect_fn(confidence_threshold, parsed_class_confidences),
         pitch_mapper=pitch_mapper,
         max_duration_sec=max_duration,
+        passes_only=passes_only,
     )
 
     return {
@@ -906,6 +902,7 @@ def start_background_annotation(
         "class_confidences": job["class_confidences"],
         "infer_fps": job["infer_fps"],
         "calibrated": pitch_mapper is not None,
+        "passes_only": passes_only,
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }
 

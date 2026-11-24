@@ -17,7 +17,9 @@ from typing import Any
 import cv2
 import numpy as np
 
-CLASS_KEYS = ("player", "football", "football goal", "player with ball")
+from app import model_config
+
+CLASS_KEYS = model_config.COUNTED_CLASSES
 WIDE_ASPECT = 1.9  # frames wider than this (w/h) are tiled
 TILE_OVERLAP = 0.15
 NMS_IOU = 0.5
@@ -56,7 +58,7 @@ def detect_frame(
     frame: np.ndarray,
     conf_threshold: float = 0.25,
     class_confidences: dict[str, float] | None = None,
-    imgsz: int = 480,
+    imgsz: int = model_config.INFER_IMGSZ,
 ) -> dict[str, Any]:
     """Run (tiled when wide) inference and return ``{"detections", "class_counts"}``."""
     h, w = frame.shape[:2]

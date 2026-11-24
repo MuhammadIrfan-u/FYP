@@ -135,12 +135,14 @@ export const AnalysisView: React.FC = () => {
     player: number;
     football: number;
     'football goal': number;
-    'player with ball': number;
+    /** referee + assistant_referee. The model has no 'player with ball' class;
+     *  the carrier is worked out from the ball's position instead. */
+    officials: number;
   }>({
     player: 0,
     football: 0,
     'football goal': 0,
-    'player with ball': 0,
+    officials: 0,
   });
   const [inferenceLatency, setInferenceLatency] = useState<number>(36);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -197,7 +199,7 @@ export const AnalysisView: React.FC = () => {
         player: counts['player'] ?? 0,
         football: counts['football'] ?? (counts['ball'] ?? 0),
         'football goal': counts['football goal'] ?? (counts['goal'] ?? 0),
-        'player with ball': counts['player with ball'] ?? 0,
+        officials: (counts['referee'] ?? 0) + (counts['assistant_referee'] ?? 0),
       });
       if (latencyMs) setInferenceLatency(latencyMs);
       if (possession) {
@@ -860,18 +862,18 @@ export const AnalysisView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Player with Ball */}
+              {/* 4. Match officials - detected so they are excluded from teams */}
               <div className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-[#059669] shadow-xs" />
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#3CB4FA] shadow-xs" />
                   <div>
-                    <span className="font-bold text-[#242424] block">Player with Ball</span>
-                    <span className="text-[10px] text-[#858585]">Class 3: player with ball</span>
+                    <span className="font-bold text-[#242424] block">Match Officials</span>
+                    <span className="text-[10px] text-[#858585]">referee + assistant_referee</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono font-black text-lg text-[#059669]">
-                    {liveClassCounts['player with ball']}
+                  <span className="font-mono font-black text-lg text-[#3CB4FA]">
+                    {liveClassCounts.officials}
                   </span>
                 </div>
               </div>
@@ -891,7 +893,8 @@ export const AnalysisView: React.FC = () => {
                     football: 0.3,
                     'football goal': 0.35,
                     player: 0.25,
-                    'player with ball': 0.25,
+                    referee: 0.25,
+                    'assistant_referee': 0.25,
                   });
                   showToast('Reset to recommended thresholds (Goal 35%, Football 30%, Player 25%)');
                 }}
@@ -992,16 +995,16 @@ export const AnalysisView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Player with Ball */}
+              {/* 4. Match officials */}
               <div className="p-3 rounded-xl bg-white border border-[#E8E3D8] space-y-1.5 shadow-2xs">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#059669]" />
-                    <span className="font-bold text-[#242424]">Player with Ball</span>
-                    <span className="text-[10px] text-[#858585]">Class 3</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#3CB4FA]" />
+                    <span className="font-bold text-[#242424]">Match Officials</span>
+                    <span className="text-[10px] text-[#858585]">referee</span>
                   </div>
-                  <span className="font-mono font-bold text-xs text-[#059669] bg-[#059669]/10 px-2 py-0.5 rounded">
-                    {Math.round((classConfidences['player with ball'] ?? 0.25) * 100)}%
+                  <span className="font-mono font-bold text-xs text-[#3CB4FA] bg-[#3CB4FA]/10 px-2 py-0.5 rounded">
+                    {Math.round((classConfidences['referee'] ?? 0.25) * 100)}%
                   </span>
                 </div>
                 <input
@@ -1009,9 +1012,13 @@ export const AnalysisView: React.FC = () => {
                   min="0.05"
                   max="0.95"
                   step="0.05"
-                  value={classConfidences['player with ball'] ?? 0.25}
-                  onChange={(e) => updateClassConfidence('player with ball', parseFloat(e.target.value))}
-                  className="w-full accent-[#059669] h-1.5 bg-[#E8E3D8] rounded-lg cursor-pointer"
+                  value={classConfidences['referee'] ?? 0.25}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    updateClassConfidence('referee', v);
+                    updateClassConfidence('assistant_referee', v);
+                  }}
+                  className="w-full accent-[#3CB4FA] h-1.5 bg-[#E8E3D8] rounded-lg cursor-pointer"
                 />
                 <div className="flex justify-between text-[10px] text-[#858585] font-mono">
                   <span>5% (Permissive)</span>
@@ -1378,7 +1385,7 @@ export const AnalysisView: React.FC = () => {
                   <span>
                     {possessionView.carrier
                       ? `${possessionView.carrier.team_label} #${possessionView.carrier.track_id} has the ball — no possession change yet.`
-                      : 'Waiting for the first ball carrier (class: player with ball).'}
+                      : 'Waiting for the first ball carrier (nearest player to the ball).'}
                   </span>
                 </div>
               )}
@@ -1507,14 +1514,14 @@ export const AnalysisView: React.FC = () => {
                 ? `${possessionView.carrier.team_label} #${possessionView.carrier.track_id}`
                 : possessionView?.status === 'in_transit'
                 ? 'Pass in Flight'
-                : liveClassCounts['player with ball'] > 0
+                : liveClassCounts.player > 0
                 ? 'Active'
                 : 'Searching'}
             </span>
             <span className="text-[11px] text-[#858585] mt-1 block">
               {possessionView
                 ? `${possessionView.totalLosses} lost • ${possessionView.totalPasses} same-team passes (${possessionView.source})`
-                : 'Class: player with ball'}
+                : 'Nearest player to the ball'}
             </span>
           </div>
         </div>
