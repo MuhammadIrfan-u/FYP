@@ -74,11 +74,14 @@ def draw_hud_header(
     chunk_info = (
         f"5s CHUNK {chunk_idx + 1}/{total_chunks} [{start_sec:.1f}s - {end_sec:.1f}s]"
     )
+    refs = counts.get("referee", 0) + counts.get("assistant_referee", 0)
     stats_info = (
         f"Players: {counts.get('player', 0)} | "
         f"Ball: {counts.get('football', 0)} | "
         f"Goals: {counts.get('football goal', 0)} | "
-        f"Refs: {counts.get('referee', 0) + counts.get('assistant_referee', 0)}"
+        f"Ball-carrier: {counts.get(model_config.CARRIER_CLASS, 0)}"
+        # Officials only exist with the improve_model_best.pt fallback.
+        + (f" | Refs: {refs}" if refs else "")
     )
 
     font_scale = max(0.4, w / 2200.0)
@@ -278,10 +281,35 @@ def draw_possession_hud(
         status_text = "BALL IN TRANSIT"
     else:
         status_text = "NO CARRIER"
+    score = state.get("score") or {}
+    if state.get("goals_enabled") or score.get("team_1") or score.get("team_2"):
+        status_text = (
+            f"GOALS {score.get('team_1', 0)}-{score.get('team_2', 0)}   {status_text}"
+        )
     small = font_scale * 0.9
     (st_w, _), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, small, 1)
     ty = y0 + strip_h + 14
     _put(frame, status_text, (w // 2 - st_w // 2, ty), small, CARRIER_GOLD)
+
+
+def draw_goal_mouths(frame: np.ndarray, mouths: list[Any]) -> None:
+    """Thin outline of each marked goal mouth, with its goal line emphasised."""
+    h, w = frame.shape[:2]
+
+    def px(p):
+        return round(p[0] / 100.0 * w), round(p[1] / 100.0 * h)
+
+    for m in mouths:
+        pts = np.array([px(p) for p in m.polygon()], dtype=np.int32)
+        cv2.polylines(frame, [pts], True, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.line(
+            frame,
+            px(m.post_left_bottom),
+            px(m.post_right_bottom),
+            CARRIER_GOLD,
+            2,
+            cv2.LINE_AA,
+        )
 
 
 def draw_possession_banner(
@@ -840,6 +868,7 @@ def chunk_possession(
         "total_losses": summary["total_losses"],
         "total_passes": summary["total_passes"],
         "events": events,
+        "score": summary["goals"]["score"],
     }
 
 
@@ -906,8 +935,12 @@ def run_chunked_annotation_worker(
     max_duration_sec: float | None = None,
     passes_only: bool = False,
     remote_video_url: str | None = None,
+    goal_mouths: list[Any] | None = None,
 ) -> None:
     """Worker function executing in a background thread to annotate 5s chunks progressively.
+
+    ``goal_mouths`` are the user's goal landmarks (``goal_landmarks.GoalMouth``); goals
+    are detected only from them, in calibrated and uncalibrated runs alike.
 
     ``passes_only`` (Passes tab): no team / jersey-colour classification, no possession
     or match analytics. Only detection boxes, pass counting and 2D pass lines.
@@ -992,8 +1025,11 @@ def run_chunked_annotation_worker(
 
         effective_infer_fps = max(0.5, min(float(infer_fps or 15.0), fps))
         infer_interval = max(1, round(fps / effective_infer_fps))
+        goal_roi_interval = max(1, round(fps / min(15.0, fps)))
         min_conf = min([confidence_threshold, *class_confidences.values()])
-        tracker = None if passes_only else TeamPossessionTracker()
+        tracker = (
+            None if passes_only else TeamPossessionTracker(goal_mouths=goal_mouths)
+        )
         # Team-agnostic pass counter, shared across chunks so boundary passes count once.
         pass_detector = PassDetector(sample_fps=fps / infer_interval)
         total_passes = 0
@@ -1079,6 +1115,7 @@ def run_chunked_annotation_worker(
                     except Exception as pass_err:  # noqa: BLE001
                         logger.warning(f"Pass detection exception: {pass_err}")
 
+                    frame_goal_event: dict[str, Any] | None = None
                     if not passes_only:
                         try:
                             latest_state = tracker.process_frame(
@@ -1086,9 +1123,15 @@ def run_chunked_annotation_worker(
                                 latest_parsed.get("detections", []),
                                 timestamp=timestamp,
                             )
+                            frame_goal_event = latest_state.get("goal_event")
                             if analytics is None and latest_state.get("event"):
                                 banner_event = latest_state["event"]
                                 banner_is_analytics = False
+                                banner_start_frame = frame_idx
+                            if analytics is None and frame_goal_event:
+                                # Uncalibrated run: the landmark goal is the banner.
+                                banner_event = frame_goal_event
+                                banner_is_analytics = True
                                 banner_start_frame = frame_idx
                         except Exception as track_err:  # noqa: BLE001
                             logger.warning(
@@ -1103,6 +1146,7 @@ def run_chunked_annotation_worker(
                                 frame_index=frame_idx,
                                 image_width=width,
                                 image_height=height,
+                                goal_event=frame_goal_event,
                             )
                             evts = analytics_state.get("events") or []
                             if evts:
@@ -1127,11 +1171,52 @@ def run_chunked_annotation_worker(
                     for k, v in counts.items():
                         chunk_class_counts[k] = chunk_class_counts.get(k, 0) + v
                     chunk_total_detections += len(latest_parsed.get("detections", []))
+                elif (
+                    not passes_only
+                    and tracker is not None
+                    and tracker.goal_detector.roi_step_useful()
+                    and infer_interval > goal_roi_interval
+                    and (frames_in_this_chunk % goal_roi_interval == 0)
+                ):
+                    timestamp = round(frame_idx / fps, 3)
+                    try:
+                        roi_goal_event = tracker.process_goal_roi_frame(
+                            frame,
+                            latest_parsed.get("detections", []),
+                            timestamp=timestamp,
+                        )
+                        if roi_goal_event is not None:
+                            if latest_state is not None:
+                                latest_state["score"] = dict(
+                                    tracker.goal_detector.score_dict()
+                                )
+                                latest_state["goal_event"] = roi_goal_event
+                            if analytics is not None:
+                                applied = analytics._apply_goal(
+                                    roi_goal_event, timestamp, analytics.ball_xy
+                                )
+                                if applied is not None:
+                                    if analytics_state is not None:
+                                        analytics_state["score"] = {
+                                            "team_1": analytics.score[1],
+                                            "team_2": analytics.score[2],
+                                        }
+                                    banner_event = applied
+                                    banner_is_analytics = True
+                                    banner_start_frame = frame_idx
+                            else:
+                                banner_event = roi_goal_event
+                                banner_is_analytics = True
+                                banner_start_frame = frame_idx
+                    except Exception as roi_err:  # noqa: BLE001
+                        logger.warning(f"Goal ROI step exception: {roi_err}")
 
                 detections = latest_parsed.get("detections", [])
                 counts = latest_parsed.get("class_counts", {})
 
                 if burn_boxes:
+                    if tracker is not None and tracker.goal_detector.enabled:
+                        draw_goal_mouths(frame, tracker.goal_detector.goal_mouths)
                     for det in detections:
                         draw_detection_box(frame, det)
 
@@ -1341,6 +1426,7 @@ def create_annotation_job(
     pitch_mapper: Any = None,
     max_duration_sec: float | None = None,
     passes_only: bool = False,
+    goal_mouths: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Initializes and launches a background chunked video annotation job.
 
@@ -1371,6 +1457,8 @@ def create_annotation_job(
         "infer_interval_frames": None,
         "possession_summary": None,
         "calibrated": pitch_mapper is not None,
+        "goals_marked": len(goal_mouths or []),
+        "goal_detection_mode": "landmarks" if goal_mouths else "auto",
         "match_stats": None,
         "total_passes": 0,
         "passes_only": passes_only,
@@ -1405,6 +1493,7 @@ def create_annotation_job(
             "infer_fps": infer_fps,
             "detect_fn": detect_fn,
             "pitch_mapper": pitch_mapper,
+            "goal_mouths": goal_mouths,
             "max_duration_sec": max_duration_sec,
             "passes_only": passes_only,
             "remote_video_url": remote_video_url,

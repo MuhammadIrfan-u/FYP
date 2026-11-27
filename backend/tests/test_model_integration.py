@@ -1,18 +1,24 @@
-"""The app runs on improve_model_best.pt, whose classes differ from best_5's.
+"""The app runs on best_5 (football, football goal, player, player with ball).
 
-Two differences drive everything here:
-
-* no ``player with ball`` class - the ball carrier is found geometrically;
-* ``referee`` / ``assistant_referee`` exist - officials must never be treated
-  as players, or they get clustered into a team and counted in possession.
+* ``best_5.pt`` loads first at its 640 training size; ``best_5.onnx`` is a static
+  480x480 export and must only ever run at 480.
+* ``player with ball`` labels the carrier directly.
+* ``improve_model_best.pt`` remains a fallback: it has no carrier class (the
+  carrier is then found geometrically) and detects referees, which must never be
+  treated as players.
 """
 
+import pathlib
 import zipfile
 
 import numpy as np
+import pytest
 
 from app import model_config
 from app.services.team_possession import TeamPossessionTracker
+
+ASSETS = pathlib.Path(model_config.__file__).resolve().parent.parent / "assets"
+BEST_5_CLASSES = {"football", "football goal", "player", "player with ball"}
 
 
 def _player(x, y, cls="player", w=4.0, h=16.0, conf=0.9):
@@ -28,8 +34,57 @@ def _ball(x, y):
 # ---------------------------------------------------------------------------
 
 
-def test_inference_runs_at_the_models_training_size():
-    assert model_config.INFER_IMGSZ == 640
+def test_best_5_is_the_active_model():
+    assert model_config.MODEL_FILENAMES[:2] == ("best_5.pt", "best_5.onnx")
+    assert "improve_model_best.pt" in model_config.MODEL_FILENAMES  # fallback
+    assert model_config.ACTIVE_MODEL_FILENAME == "best_5.pt"
+
+
+def test_inference_runs_at_the_active_models_size():
+    assert model_config.INFER_IMGSZ == 640  # best_5.pt training size
+
+
+def test_static_onnx_export_always_runs_at_its_export_size():
+    """best_5.onnx's input is fixed at [1, 3, 480, 480]; 640 would crash it."""
+    assert model_config.infer_imgsz_for("best_5.onnx", env={}) == 480
+    assert (
+        model_config.infer_imgsz_for("best_5.onnx", env={"YOLO_INFER_IMGSZ": "640"})
+        == 480
+    )
+
+
+def test_imgsz_override_only_for_dynamic_models():
+    assert (
+        model_config.infer_imgsz_for("best_5.pt", env={"YOLO_INFER_IMGSZ": "480"})
+        == 480
+    )
+    assert (
+        model_config.infer_imgsz_for("best_5.pt", env={"YOLO_INFER_IMGSZ": "500"})
+        == 640
+    )
+    assert (
+        model_config.infer_imgsz_for("best_5.pt", env={"YOLO_INFER_IMGSZ": "x"}) == 640
+    )
+
+
+def test_model_filename_env_override(tmp_path):
+    env = {"YOLO_MODEL_FILENAME": "best_5.onnx"}
+    assert model_config.model_filenames(env)[0] == "best_5.onnx"
+    assert len(set(model_config.model_filenames(env))) == 3  # no duplicates
+    # Falls back to the next file on disk when the requested one is missing.
+    (tmp_path / "best_5.pt").write_bytes(b"")
+    assert model_config.resolve_model_filename(tmp_path, env) == "best_5.pt"
+    (tmp_path / "best_5.onnx").write_bytes(b"")
+    assert model_config.resolve_model_filename(tmp_path, env) == "best_5.onnx"
+
+
+def test_best_5_classes_and_confidences():
+    assert set(model_config.FALLBACK_CLASS_NAMES.values()) == BEST_5_CLASSES
+    conf = model_config.DEFAULT_CLASS_CONFIDENCES
+    assert conf["player with ball"] == 0.25 and conf["player"] == 0.25
+    assert conf["football"] == 0.30 and conf["football goal"] == 0.35
+    assert model_config.CARRIER_CLASS in model_config.PLAYER_CLASSES
+    assert model_config.is_player("player with ball")
 
 
 def test_officials_are_not_players():
@@ -44,27 +99,35 @@ def test_officials_are_not_players():
 
 def test_class_counts_cover_both_models_classes():
     counts = model_config.empty_class_counts()
-    # New model's classes...
-    for cls in ("player", "football", "referee", "assistant_referee"):
+    # Active best_5 classes...
+    for cls in BEST_5_CLASSES:
         assert cls in counts
-    # ...and the old one's, so best_5 still reports sensibly as a fallback.
-    assert model_config.CARRIER_CLASS in counts
+    # ...and the fallback model's officials.
+    for cls in ("referee", "assistant_referee"):
+        assert cls in counts
     assert all(v == 0 for v in counts.values())
 
 
-def test_shipped_model_is_a_real_checkpoint_with_the_expected_classes():
-    """Guards the weights file itself: the original upload was a renamed
-    training-run archive, which loads as nothing at all."""
-    path = model_config.__file__.rsplit("app", 1)[0] + "assets/improve_model_best.pt"
-    import pathlib
-
-    p = pathlib.Path(path)
+@pytest.mark.parametrize("filename", ["best_5.pt", "improve_model_best.pt"])
+def test_shipped_models_are_real_checkpoints(filename):
+    """Guards the weights files: an earlier upload was a renamed training-run
+    archive, which loads as nothing at all."""
+    p = ASSETS / filename
     assert p.exists(), f"model missing at {p}"
     with zipfile.ZipFile(p) as z:
         names = z.namelist()
     assert any(n.endswith("data.pkl") for n in names), (
         "not a torch checkpoint - was a training-run .zip renamed to .pt?"
     )
+
+
+def test_best_5_onnx_input_is_the_480_export():
+    ort = pytest.importorskip("onnxruntime")
+    session = ort.InferenceSession(
+        str(ASSETS / "best_5.onnx"), providers=["CPUExecutionProvider"]
+    )
+    assert session.get_inputs()[0].shape == [1, 3, 480, 480]
+    assert model_config.MODEL_INPUT_SIZES["best_5.onnx"] == 480
 
 
 # ---------------------------------------------------------------------------

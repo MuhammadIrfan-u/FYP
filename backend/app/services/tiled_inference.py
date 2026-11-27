@@ -1,7 +1,8 @@
 """Tiled YOLO inference for wide full-field videos (e.g. 4096x1080 panoramas).
 
-The exported model runs at a fixed 480x480 input. Shrinking a 4096 px wide panorama to
-480 px makes players a few pixels tall, so wide frames are split into overlapping,
+The model runs at ``model_config.INFER_IMGSZ`` (640 for best_5.pt, a fixed 480 for the
+static best_5.onnx export). Shrinking a 4096 px wide panorama to that size makes players
+a few pixels tall, so wide frames are split into overlapping,
 roughly square, full-height tiles. Each tile is inferred separately and the boxes are
 merged back with class-wise NMS.
 

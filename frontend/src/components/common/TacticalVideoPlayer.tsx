@@ -13,8 +13,15 @@ import {
   AlertCircle,
   ShieldAlert,
   ArrowRightLeft,
+  Trophy,
 } from 'lucide-react';
-import { DetectionBox, PossessionEventItem, PossessionState } from '@/types/football';
+import {
+  DetectionBox,
+  GoalEvent,
+  GoalLandmarkGoal,
+  PossessionEventItem,
+  PossessionState,
+} from '@/types/football';
 import {
   analyzeFrameWithYOLO,
   resetPossessionSession,
@@ -24,6 +31,7 @@ import {
 
 const LIVE_POLL_INTERVAL_MS = 100;
 const BANNER_DURATION_MS = 2200;
+const GOAL_BANNER_DURATION_MS = 3500;
 const CARRIER_GOLD = '#F5B700';
 
 function createSessionId(): string {
@@ -53,6 +61,10 @@ interface TacticalVideoPlayerProps {
   /** Called when the live tracking session restarts (new video or restart from 00:00). */
   onPossessionReset?: () => void;
   onPlayStateChange?: (isPlaying: boolean) => void;
+  /** Backend filename of the video, so the backend uses its marked goal landmarks. */
+  videoFilename?: string;
+  /** Marked goal mouths, drawn over the video (percent coordinates). */
+  goalMarks?: GoalLandmarkGoal[];
 }
 
 export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
@@ -67,6 +79,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   onDetectionsUpdate,
   onPossessionReset,
   onPlayStateChange,
+  videoFilename,
+  goalMarks,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -81,6 +95,9 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
 
   const [possession, setPossession] = useState<PossessionState | null>(null);
   const [bannerEvent, setBannerEvent] = useState<PossessionEventItem | null>(null);
+  const [goalBanner, setGoalBanner] = useState<GoalEvent | null>(null);
+  const lastGoalIdRef = useRef<string | null>(null);
+  const goalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
@@ -117,9 +134,19 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     bannerTimerRef.current = setTimeout(() => setBannerEvent(null), BANNER_DURATION_MS);
   }, []);
 
+  // GOAL! popup (takes priority over the possession banner while visible).
+  const showGoalBanner = useCallback((goal: GoalEvent | null | undefined) => {
+    if (!goal || goal.id === lastGoalIdRef.current) return;
+    lastGoalIdRef.current = goal.id;
+    setGoalBanner(goal);
+    if (goalTimerRef.current) clearTimeout(goalTimerRef.current);
+    goalTimerRef.current = setTimeout(() => setGoalBanner(null), GOAL_BANNER_DURATION_MS);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      if (goalTimerRef.current) clearTimeout(goalTimerRef.current);
     };
   }, []);
 
@@ -133,8 +160,10 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
   const restartPossessionSession = useCallback(() => {
     resetPendingRef.current = true;
     lastBannerEventIdRef.current = null;
+    lastGoalIdRef.current = null;
     setPossession(null);
     setBannerEvent(null);
+    setGoalBanner(null);
     if (sessionIdRef.current) {
       void resetPossessionSession(sessionIdRef.current);
     }
@@ -155,6 +184,12 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       }
     }
   }, [videoUrl, restartPossessionSession]);
+
+  // Goals marked or changed: start a fresh session so the backend reloads them.
+  const goalMarksSignature = JSON.stringify(goalMarks ?? []);
+  useEffect(() => {
+    restartPossessionSession();
+  }, [goalMarksSignature, restartPossessionSession]);
 
   // Filter boxes by confidence threshold (incorporating per-class confidence if provided)
   const visibleBoxes: DetectionBox[] = currentBoxes.filter((box) => {
@@ -231,6 +266,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         sessionId: getSessionId(),
         timestamp: frameTime,
         resetSession,
+        videoFilename,
       });
 
       if (res && res.success) {
@@ -243,6 +279,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         setCurrentBoxes(mappedBoxes);
         setPossession(framePossession);
         showPossessionBanner(framePossession?.event);
+        showGoalBanner(framePossession?.goal_event);
 
         if (onDetectionsUpdate) {
           onDetectionsUpdate(mappedBoxes, res.class_counts, res.inference_time_ms, framePossession);
@@ -265,6 +302,8 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
     imageSrc,
     getSessionId,
     showPossessionBanner,
+    showGoalBanner,
+    videoFilename,
   ]);
 
   // Synchronize timeline detections if available
@@ -294,6 +333,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
         setCurrentBoxes(mapped);
         setPossession(entryPossession);
         showPossessionBanner(entryPossession?.event);
+        showGoalBanner(entryPossession?.goal_event);
         if (onDetectionsUpdate) {
           onDetectionsUpdate(mapped, entry.counts, lastLatencyMs, entryPossession);
         }
@@ -301,7 +341,7 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
       }
     }
     return false;
-  }, [timeline, onDetectionsUpdate, lastLatencyMs, showPossessionBanner]);
+  }, [timeline, onDetectionsUpdate, lastLatencyMs, showPossessionBanner, showGoalBanner]);
 
   // Playback timer simulation when video element has error or fallback image is used
   useEffect(() => {
@@ -585,6 +625,41 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
           />
         )}
 
+        {/* Marked goal mouths (goal detection uses only these) */}
+        {goalMarks && goalMarks.length > 0 && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          >
+            {goalMarks.map((g) => {
+              const p = g.points;
+              const quad = [p.post_left_bottom, p.post_right_bottom, p.post_right_top, p.post_left_top];
+              return (
+                <g key={g.id}>
+                  <polygon
+                    points={quad.map(([x, y]) => `${x},${y}`).join(' ')}
+                    fill="rgba(255,255,255,0.06)"
+                    stroke="#FFFFFF"
+                    strokeWidth={1.2}
+                    strokeDasharray="4 3"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <line
+                    x1={p.post_left_bottom[0]}
+                    y1={p.post_left_bottom[1]}
+                    x2={p.post_right_bottom[0]}
+                    y2={p.post_right_bottom[1]}
+                    stroke={CARRIER_GOLD}
+                    strokeWidth={2}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
         {/* YOLO Bounding Boxes Layer */}
         {showBoxes && (
           <div className="absolute inset-0 pointer-events-none">
@@ -728,11 +803,38 @@ export const TacticalVideoPlayer: React.FC<TacticalVideoPlayerProps> = ({
                 ? 'Ball in transit'
                 : 'No carrier'}
             </span>
+            {possession.goals_enabled && possession.score && (
+              <span className="text-[10px] font-mono font-bold text-[#F5B700]">
+                Goals {possession.score.team_1} – {possession.score.team_2}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* GOAL! popup banner (priority over possession banners) */}
+        {goalBanner && (
+          <div
+            key={goalBanner.id}
+            className="absolute top-[16%] left-1/2 -translate-x-1/2 pointer-events-none z-20 animate-in fade-in zoom-in-75 duration-300"
+          >
+            <div className="px-6 sm:px-10 py-3 rounded-2xl border-2 border-[#FDE68A] bg-[#D97706]/95 shadow-2xl text-white text-center">
+              <div className="flex items-center justify-center gap-2 text-xl sm:text-3xl font-black tracking-widest uppercase">
+                <Trophy className="w-6 h-6 sm:w-8 sm:h-8 animate-bounce" />
+                <span>Goal!</span>
+              </div>
+              <div className="text-[11px] sm:text-sm font-semibold mt-0.5">
+                {goalBanner.team != null
+                  ? `Team ${goalBanner.team}${goalBanner.scorer != null ? ` • #${goalBanner.scorer}` : ''}`
+                  : 'Scorer not identified'}
+                {' • '}
+                {goalBanner.score.team_1} – {goalBanner.score.team_2}
+              </div>
+            </div>
           </div>
         )}
 
         {/* Possession Lost / Not Lost popup banner */}
-        {bannerEvent && (
+        {bannerEvent && !goalBanner && (
           <div
             key={bannerEvent.id}
             className="absolute top-[18%] left-1/2 -translate-x-1/2 pointer-events-none z-10 animate-in fade-in zoom-in-90 slide-in-from-top-4 duration-300"

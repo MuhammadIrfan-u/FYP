@@ -21,6 +21,7 @@ import {
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { PitchCalibrationModal } from '@/components/common/PitchCalibrationModal';
+import { GoalLandmarkModal } from '@/components/common/GoalLandmarkModal';
 import { MatchVideo } from '@/types/football';
 
 export const UploadView: React.FC = () => {
@@ -57,12 +58,12 @@ export const UploadView: React.FC = () => {
     'football goal': 0.35,
     'football': 0.30,
     'player': 0.25,
-    'referee': 0.25,
-    'assistant_referee': 0.25,
+    'player with ball': 0.25,
   });
   const [isStartingStream, setIsStartingStream] = useState<boolean>(false);
   // Step 1: drag-and-drop pitch landmarks (homography) before any analysis starts.
   const [calibrationVideo, setCalibrationVideo] = useState<MatchVideo | null>(null);
+  const [goalVideo, setGoalVideo] = useState<MatchVideo | null>(null);
   const [calibrationSummary, setCalibrationSummary] = useState<string | null>(null);
   const [modalInferFps, setModalInferFps] = useState<number>(5);
   const [modalMaxMinutes, setModalMaxMinutes] = useState<number>(0);
@@ -170,8 +171,7 @@ export const UploadView: React.FC = () => {
       'football goal': classConfidences['football goal'] ?? 0.35,
       'football': classConfidences['football'] ?? 0.30,
       'player': classConfidences['player'] ?? 0.25,
-      'referee': classConfidences['referee'] ?? 0.25,
-      'assistant_referee': classConfidences['assistant_referee'] ?? 0.25,
+      'player with ball': classConfidences['player with ball'] ?? 0.25,
     });
   };
 
@@ -785,6 +785,26 @@ export const UploadView: React.FC = () => {
               `${result.quality.points} landmarks, ${result.quality.model}` +
                 (result.quality.loo_rmse_m != null ? `, ±${result.quality.loo_rmse_m} m` : '')
             );
+            // Next: mark the goals (optional) before the analysis settings.
+            setGoalVideo(target);
+          }}
+        />
+      )}
+
+      {/* Goal landmarks — optional step; skipped, goals are detected automatically */}
+      {goalVideo && (
+        <GoalLandmarkModal
+          video={goalVideo}
+          onClose={() => setGoalVideo(null)}
+          continueLabel="Save goals & continue to step 2"
+          onSkip={() => {
+            const target = goalVideo;
+            setGoalVideo(null);
+            handleOpenAnnotateModal(target);
+          }}
+          onSaved={() => {
+            const target = goalVideo;
+            setGoalVideo(null);
             handleOpenAnnotateModal(target);
           }}
         />

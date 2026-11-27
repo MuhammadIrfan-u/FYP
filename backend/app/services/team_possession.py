@@ -32,6 +32,8 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from app import model_config
+from app.services.goal_detection import GoalDetector
+from app.services.goal_landmarks import GoalMouth
 
 PLAYER_CLASSES = model_config.PLAYER_CLASSES
 CARRIER_CLASS = model_config.CARRIER_CLASS
@@ -465,6 +467,7 @@ class TeamPossessionTracker:
         max_match_distance_pct: float = 12.0,
         color_cost_weight: float = 0.6,
         max_events: int = 300,
+        goal_mouths: list[GoalMouth] | None = None,
     ):
         self.ema_alpha = ema_alpha
         self.vote_window = vote_window
@@ -474,6 +477,8 @@ class TeamPossessionTracker:
         self.max_events = max_events
         self._lock = threading.RLock()
         self.reset()
+        if goal_mouths:
+            self.set_goal_mouths(goal_mouths)
 
     # -- state ------------------------------------------------------------
 
@@ -497,6 +502,17 @@ class TeamPossessionTracker:
             self.last_player_counts = dict.fromkeys(TEAM_IDS, 0)
             self.last_timestamp: float | None = None
             self.last_used_at = time.time()
+            # Goal detection from the user's goal landmarks (none until set).
+            self.goal_detector = GoalDetector()
+            self.goal_source_video: str | None = None
+
+    def set_goal_mouths(
+        self, goal_mouths: list[GoalMouth] | None, source_video: str | None = None
+    ) -> None:
+        """Use these marked goal mouths for goal detection (empty list disables it)."""
+        with self._lock:
+            self.goal_detector.set_goal_mouths(goal_mouths)
+            self.goal_source_video = source_video
 
     # -- team assignment --------------------------------------------------
 
@@ -681,8 +697,10 @@ class TeamPossessionTracker:
     ) -> dict[str, Any] | None:
         """The player in control of the ball, or ``None``.
 
-        Prefers an explicit ``player with ball`` detection, but the current
-        model has no such class, so it falls back to the player whose feet are
+        Prefers an explicit ``player with ball`` detection (best_5, the active
+        model, labels the carrier directly; ties go to the one nearest the ball).
+        Without one - a frame where best_5 missed the carrier, or the
+        improve_model_best.pt fallback - it uses the player whose feet are
         nearest the ball.
         """
         carriers = [
@@ -888,6 +906,14 @@ class TeamPossessionTracker:
             if carrier is not None:
                 self.last_carrier = carrier
 
+            goal_event = self.goal_detector.update(
+                detections,
+                timestamp=timestamp,
+                frame_index=self.frame_index,
+                carrier=carrier,
+                frame_bgr=frame_bgr,
+            )
+
             return {
                 "frame_index": self.frame_index,
                 "timestamp": None if timestamp is None else round(float(timestamp), 3),
@@ -905,7 +931,46 @@ class TeamPossessionTracker:
                 "total_losses": sum(self.losses.values()),
                 "total_passes": sum(self.passes.values()),
                 "teams_ready": self.team_centroids is not None,
+                "goal_event": goal_event,
+                "score": dict(self.goal_detector.score_dict()),
+                # Goals are detected in both modes: from the marked goal landmarks,
+                # or automatically from YOLO "football goal" boxes when none exist.
+                "goals_enabled": self.goal_detector.enabled,
+                "goal_detection_mode": self.goal_detector.mode,
+                "goals_marked": len(self.goal_detector.goal_mouths),
             }
+
+    def process_goal_roi_frame(
+        self,
+        frame_bgr: np.ndarray,
+        last_detections: list[dict[str, Any]],
+        timestamp: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Lightweight goal-ROI motion update for frames between full YOLO strides.
+
+        Uses the last known player boxes only for exclusion masking (never reuses
+        stale ball boxes) so fast goal-line crossings are sampled at >= 15 fps
+        even when full-frame YOLO runs at 5 fps.
+
+        In automatic mode (no landmarks) the motion model needs a static camera, so
+        this only runs once a detected goal box has stayed put.
+        """
+        with self._lock:
+            if not self.goal_detector.roi_step_useful():
+                return None
+            non_ball = [
+                d
+                for d in last_detections
+                if str(d.get("class", "")).lower().strip() != BALL_CLASS
+            ]
+            return self.goal_detector.update(
+                non_ball,
+                timestamp=timestamp,
+                frame_index=self.frame_index,
+                carrier=None,
+                frame_bgr=frame_bgr,
+                roi_only=True,
+            )
 
     def get_summary(self, max_events: int = 100) -> dict[str, Any]:
         with self._lock:
@@ -923,6 +988,7 @@ class TeamPossessionTracker:
                 "current_carrier": self.last_carrier,
                 "teams_ready": self.team_centroids is not None,
                 "active_tracks": len(self.tracks),
+                "goals": self.goal_detector.summary(),
             }
 
 

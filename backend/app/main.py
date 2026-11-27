@@ -17,6 +17,19 @@ from pydantic import BaseModel, Field
 from ultralytics import YOLO
 
 from app import model_config
+from app.services.goal_landmarks import (
+    POINT_IDS as GOAL_POINT_IDS,
+)
+from app.services.goal_landmarks import (
+    POINT_LABELS as GOAL_POINT_LABELS,
+)
+from app.services.goal_landmarks import (
+    delete_goal_landmarks,
+    goals_from_pixels,
+    load_goal_landmarks_data,
+    load_goal_mouths,
+    save_goal_landmarks,
+)
 from app.services.pitch_homography import (
     DEFAULT_PITCH_LENGTH,
     DEFAULT_PITCH_WIDTH,
@@ -53,7 +66,7 @@ torch.set_num_threads(4)
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 ASSETS_DIR = BASE_DIR / "assets"
-MODEL_PATH = ASSETS_DIR / model_config.MODEL_FILENAMES[0]
+MODEL_PATH = ASSETS_DIR / model_config.ACTIVE_MODEL_FILENAME
 INFER_IMGSZ = model_config.INFER_IMGSZ
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -78,12 +91,11 @@ app.add_middleware(
 # Serve uploaded videos
 app.mount("/api/videos", StaticFiles(directory=str(UPLOADS_DIR)), name="videos")
 
-# Load the detection model: the first candidate present on disk wins, so the
-# older best_5 weights still work if the current model is missing.
-target_model_path = next(
-    (p for p in (ASSETS_DIR / n for n in model_config.MODEL_FILENAMES) if p.exists()),
-    MODEL_PATH,
-)
+# Load the detection model: the first candidate present on disk wins (best_5.pt,
+# then best_5.onnx, then improve_model_best.pt; YOLO_MODEL_FILENAME goes first).
+# model_config resolved the same file, so INFER_IMGSZ matches it (480 for the
+# static best_5.onnx export, 640 otherwise).
+target_model_path = MODEL_PATH
 print(f"Loading YOLO model from: {target_model_path} (imgsz {INFER_IMGSZ})")
 try:
     if not target_model_path.exists():
@@ -239,6 +251,7 @@ async def analyze_frame(raw_request: Request):
     session_id: str | None = None
     frame_timestamp: float | None = None
     reset_session = False
+    frame_video: str | None = None  # whose goal landmarks to use
 
     content_type = raw_request.headers.get("content-type", "").lower()
 
@@ -253,6 +266,7 @@ async def analyze_frame(raw_request: Request):
             session_id = body.get("session_id") or None
             frame_timestamp = _parse_optional_float(body.get("timestamp"))
             reset_session = _parse_bool(body.get("reset_session"))
+            frame_video = body.get("video_filename") or None
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -274,6 +288,7 @@ async def analyze_frame(raw_request: Request):
             session_id = form.get("session_id") or None
             frame_timestamp = _parse_optional_float(form.get("timestamp"))
             reset_session = _parse_bool(form.get("reset_session"))
+            frame_video = form.get("video_filename") or None
             cls_conf_field = form.get("class_confidences")
             if cls_conf_field:
                 try:
@@ -306,6 +321,7 @@ async def analyze_frame(raw_request: Request):
             session_id = body.get("session_id") or None
             frame_timestamp = _parse_optional_float(body.get("timestamp"))
             reset_session = _parse_bool(body.get("reset_session"))
+            frame_video = body.get("video_filename") or None
 
             if "," in b64_data:
                 b64_data = b64_data.split(",", 1)[1]
@@ -346,6 +362,12 @@ async def analyze_frame(raw_request: Request):
         tracker = get_or_create_session_tracker(str(session_id), reset=reset_session)
     else:
         tracker = TeamPossessionTracker()
+    # Goal landmarks of this video (loaded once per session, again after a reset).
+    if frame_video and tracker.goal_source_video != Path(str(frame_video)).name:
+        tracker.set_goal_mouths(
+            load_goal_mouths(calibrations_dir(), str(frame_video)),
+            source_video=Path(str(frame_video)).name,
+        )
     possession = tracker.process_frame(
         img_bgr, parsed["detections"], timestamp=frame_timestamp
     )
@@ -480,7 +502,10 @@ def analyze_video(
     # Calculate step in frames (dense sampling so passes/turnovers are not skipped)
     sample_fps = max(0.1, float(sample_fps or 10.0))
     step_frames = max(1, round(video_fps / sample_fps))
-    possession_tracker = TeamPossessionTracker()
+    possession_tracker = TeamPossessionTracker(
+        goal_mouths=load_goal_mouths(calibrations_dir(), video_path.name)
+        or load_goal_mouths(calibrations_dir(), video_filename)
+    )
 
     timeline = {}
     aggregated_counts = model_config.empty_class_counts()
@@ -696,6 +721,85 @@ def get_homography(video_filename: str):
     return _calibration_response(mapper, saved=True)
 
 
+# ---------------------------------------------------------------------------
+# Goal landmarks (the only source of goal positions for goal detection)
+# ---------------------------------------------------------------------------
+
+
+class GoalLandmarkPoint(BaseModel):
+    id: str  # post_left_bottom / post_right_bottom / post_right_top / post_left_top
+    x: float  # image pixels in the frame the user clicked on
+    y: float
+
+
+class GoalLandmarkGoal(BaseModel):
+    id: str
+    side: str | None = None  # pitch end: "left" / "right" (optional)
+    label: str = ""
+    points: list[GoalLandmarkPoint]
+
+
+class GoalLandmarksRequest(BaseModel):
+    video_filename: str
+    image_width: int = Field(gt=0)
+    image_height: int = Field(gt=0)
+    goals: list[GoalLandmarkGoal]
+
+
+def _goal_landmarks_response(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "success": True,
+        "video_filename": data.get("video_filename"),
+        "image_width": data.get("image_width"),
+        "image_height": data.get("image_height"),
+        "goals": data.get("goals", []),
+    }
+
+
+@app.get("/api/goal-landmarks/points")
+def get_goal_landmark_points():
+    """The four corners to click for each goal, in clicking order."""
+    return {
+        "points": [{"id": p, "label": GOAL_POINT_LABELS[p]} for p in GOAL_POINT_IDS],
+        "max_goals": 2,
+    }
+
+
+@app.post("/api/goal-landmarks")
+def save_goal_landmarks_endpoint(req: GoalLandmarksRequest):
+    """Save the marked goal mouths for a video (replaces any saved ones)."""
+    try:
+        mouths = goals_from_pixels(
+            [g.model_dump() for g in req.goals], req.image_width, req.image_height
+        )
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    data = save_goal_landmarks(
+        calibrations_dir(),
+        req.video_filename,
+        mouths,
+        req.image_width,
+        req.image_height,
+    )
+    return _goal_landmarks_response(data)
+
+
+@app.get("/api/goal-landmarks")
+def get_goal_landmarks_endpoint(video_filename: str):
+    data = load_goal_landmarks_data(calibrations_dir(), video_filename)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No goals marked for this video.")
+    return _goal_landmarks_response(data)
+
+
+@app.delete("/api/goal-landmarks")
+def delete_goal_landmarks_endpoint(video_filename: str):
+    return {
+        "success": True,
+        "deleted": delete_goal_landmarks(calibrations_dir(), video_filename),
+    }
+
+
 def _make_detect_fn(confidence_threshold: float, class_confidences: dict[str, float]):
     """Tiled inference for wide (full-field panorama) frames, classic path otherwise."""
     min_conf = min([confidence_threshold, *class_confidences.values()])
@@ -878,6 +982,14 @@ def start_background_annotation(
             detail="Pitch calibration required: place the field landmarks first.",
         )
 
+    # Goal landmarks (goals are detected only from the marked goal mouths).
+    goal_mouths = []
+    for name in (target_video_path.name if target_video_path else None, video_filename):
+        if name:
+            goal_mouths = load_goal_mouths(calibrations_dir(), name)
+            if goal_mouths:
+                break
+
     # 4. Create job and start background progressive processing
     job = create_annotation_job(
         video_source_path=target_video_path,
@@ -895,6 +1007,7 @@ def start_background_annotation(
         pitch_mapper=pitch_mapper,
         max_duration_sec=max_duration,
         passes_only=passes_only,
+        goal_mouths=goal_mouths,
     )
 
     return {
@@ -905,6 +1018,9 @@ def start_background_annotation(
         "class_confidences": job["class_confidences"],
         "infer_fps": job["infer_fps"],
         "calibrated": pitch_mapper is not None,
+        "goals_marked": len(goal_mouths),
+        # Goals are detected either way: marked landmarks, else YOLO goal boxes.
+        "goal_detection_mode": "landmarks" if goal_mouths else "auto",
         "passes_only": passes_only,
         "message": "Background annotation started. 5-second subvideos will stream progressively as they finish.",
     }

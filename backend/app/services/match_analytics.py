@@ -22,9 +22,11 @@ Logic
     - more than ``max_pass_gap_sec`` without control -> new possession, no pass
 * Possession time goes to the team of the last confirmed carrier while the ball is in
   play (paused after the ball goes out or a goal is scored, until the next touch).
-* Goal: the ball, after being in play, is seen behind a goal line between the posts
-  (within net depth) for ``goal_confirm_samples`` samples. Scorer = last carrier; when
-  the scorer's team defends that goal it is logged as an own goal.
+* Goal: confirmed by the goal-landmark detector (``goal_detection.GoalDetector``, run
+  inside ``TeamPossessionTracker`` on the user's marked goal mouths) and passed in as
+  ``goal_event``. This class only credits it: scorer = last confirmed carrier; when the
+  scorer's team defends that goal it is logged as an own goal. While the ball is
+  behind a goal line between the posts it is never called out of play.
 * Out of play: ball seen outside the touchline/goal line (not in the goal) ->
   throw-in / corner / goal kick based on the line and the last team in control.
 """
@@ -44,7 +46,6 @@ from app.services.pitch_homography import GOAL_HALF_WIDTH, PitchMapper
 
 PLAYER_CLASSES = model_config.PLAYER_CLASSES
 BALL_CLASS = model_config.BALL_CLASS
-GOAL_CLASS = model_config.GOAL_CLASS
 TEAM_IDS = (1, 2)
 
 OFF_PITCH_MARGIN_M = 3.0
@@ -118,7 +119,6 @@ class MatchAnalytics:
         min_pass_m: float = 3.0,
         interception_m: float = 5.0,
         max_pass_gap_sec: float = 8.0,
-        goal_confirm_samples: int = 2,
         goal_cooldown_sec: float = 10.0,
         net_depth_m: float = 2.5,
         goal_post_tolerance_m: float = 1.0,
@@ -132,7 +132,6 @@ class MatchAnalytics:
         self.min_pass_m = min_pass_m
         self.interception_m = interception_m
         self.max_pass_gap_sec = max_pass_gap_sec
-        self.goal_confirm_samples = goal_confirm_samples
         self.goal_cooldown_sec = goal_cooldown_sec
         self.net_depth_m = net_depth_m
         self.goal_post_tolerance_m = goal_post_tolerance_m
@@ -189,8 +188,6 @@ class MatchAnalytics:
         )
         self.possession_team: int | None = None
 
-        self.goal_streak = 0
-        self.goal_side: str | None = None
         self.last_goal_t = -math.inf
         self.out_streak = 0
 
@@ -254,7 +251,13 @@ class MatchAnalytics:
         frame_index: int,
         image_width: int,
         image_height: int,
+        goal_event: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """One analysed sample.
+
+        ``goal_event`` is the goal confirmed on this sample by the goal-landmark
+        detector (``state["goal_event"]`` from ``TeamPossessionTracker``), if any.
+        """
         t = float(timestamp)
         dt = 0.0 if self.last_t is None else max(0.0, min(t - self.last_t, 2.0))
         self.last_t = t
@@ -306,11 +309,11 @@ class MatchAnalytics:
             self.ball_xy, self.ball_t = ball_xy, t
 
         # ---- goal / out of play ------------------------------------------
-        goal_event = self._check_goal(
-            ball_xy, t, detections, ball_img, image_width, image_height
-        )
-        if goal_event:
-            new_events.append(goal_event)
+        # Goals come only from the goal-landmark detector (TeamPossessionTracker);
+        # this class credits them (own goals, player stats, play paused).
+        applied_goal = self._apply_goal(goal_event, t, ball_xy) if goal_event else None
+        if applied_goal:
+            new_events.append(applied_goal)
         else:
             out_event = self._check_out(ball_xy, t)
             if out_event:
@@ -706,49 +709,44 @@ class MatchAnalytics:
             description=f"Team {team} #{tid} {verb} Team {from_team} #{from_id}",
         )
 
-    def _check_goal(
-        self,
-        ball_xy: np.ndarray | None,
-        t: float,
-        detections: list[dict[str, Any]],
-        ball_img: tuple[float, float] | None,
-        w: int,
-        h: int,
+    def _goal_side(
+        self, goal_event: dict[str, Any], ball_xy: np.ndarray | None
+    ) -> str | None:
+        """Pitch end of the goal.
+
+        1. The landmark's side, when the user set one.
+        2. Where the ball is on the calibrated pitch (x < half length -> left).
+        3. Auto mode without a ball position: which half of the screen the detected
+           goal box is on (centre < 50% -> left), as with a main broadcast camera.
+        """
+        side = goal_event.get("goal_side")
+        if side in ("left", "right"):
+            return side
+        ref = ball_xy if ball_xy is not None else self.ball_xy
+        if ref is not None:
+            return "left" if float(ref[0]) < self.L / 2.0 else "right"
+        box = goal_event.get("goal_box")
+        if box and len(box) == 4:
+            return "left" if float(box[0]) + float(box[2]) / 2.0 < 50.0 else "right"
+        screen = goal_event.get("screen_side")
+        return screen if screen in ("left", "right") else None
+
+    def _apply_goal(
+        self, goal_event: dict[str, Any], t: float, ball_xy: np.ndarray | None
     ) -> dict[str, Any] | None:
-        if ball_xy is None or t - self.last_goal_t < self.goal_cooldown_sec:
+        """Credit a goal confirmed by the goal-landmark detector."""
+        if t - self.last_goal_t < self.goal_cooldown_sec:
             return None
-        bx, by = float(ball_xy[0]), float(ball_xy[1])
-        cy = self.W / 2.0
-        between_posts = abs(by - cy) <= GOAL_HALF_WIDTH + self.goal_post_tolerance_m
-        side = None
-        if between_posts and -self.net_depth_m <= bx < -0.2:
-            side = "left"
-        elif between_posts and self.L + 0.2 < bx <= self.L + self.net_depth_m:
-            side = "right"
-        if side is None or not self.ball_in_play:
-            self.goal_streak = 0
-            self.goal_side = None
-            return None
-
-        self.goal_streak = self.goal_streak + 1 if self.goal_side == side else 1
-        self.goal_side = side
-        in_goal_box = ball_img is not None and any(
-            _cls(d) == GOAL_CLASS
-            and d["x"] / 100 * w <= ball_img[0] <= (d["x"] + d["w"]) / 100 * w
-            and d["y"] / 100 * h <= ball_img[1] <= (d["y"] + d["h"]) / 100 * h
-            for d in detections
-        )
-        if self.goal_streak < self.goal_confirm_samples and not in_goal_box:
-            return None
-
-        # Goal confirmed.
-        self.goal_streak = 0
+        side = self._goal_side(goal_event, ball_xy)
         self.last_goal_t = t
         self.ball_in_play = False
         last = self.last_control
         scorer = last["track_id"] if last and t - last["t"] <= 6.0 else None
         scorer_team = last["team"] if last and t - last["t"] <= 6.0 else None
-        defending = self.defending_team(side)
+        if scorer is None:
+            scorer = goal_event.get("scorer")
+            scorer_team = goal_event.get("team")
+        defending = self.defending_team(side) if side else None
         own_goal = (
             scorer_team is not None
             and defending is not None
@@ -782,9 +780,12 @@ class MatchAnalytics:
             scorer=scorer,
             own_goal=own_goal,
             goal_side=side,
-            confirmed_by_goal_detection=in_goal_box,
+            goal_id=goal_event.get("goal_id"),
+            detection_mode=goal_event.get("detection_mode"),
+            confirmation=goal_event.get("confirmation"),
+            confidence=goal_event.get("confidence"),
             score={"team_1": self.score[1], "team_2": self.score[2]},
-            end=ball_xy,
+            end=ball_xy if ball_xy is not None else self.ball_xy,
             description=desc,
         )
 
@@ -796,7 +797,18 @@ class MatchAnalytics:
         margin = 0.5
         out_side = by < -margin or by > self.W + margin
         out_end = bx < -margin or bx > self.L + margin
-        if not (out_side or out_end):
+        # Behind the goal line between the posts may be a goal that the landmark
+        # detector is still confirming: never call that a goal kick / corner.
+        in_goal_area = (
+            out_end
+            and not out_side
+            and abs(by - self.W / 2.0) <= GOAL_HALF_WIDTH + self.goal_post_tolerance_m
+            and (
+                -self.net_depth_m <= bx < 0.0
+                or self.L < bx <= self.L + self.net_depth_m
+            )
+        )
+        if not (out_side or out_end) or in_goal_area:
             self.out_streak = 0
             return None
         self.out_streak += 1

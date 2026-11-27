@@ -19,14 +19,19 @@ import {
   ArrowRightLeft,
   ArrowRight,
   CircleDot,
+  Trophy,
+  Goal,
 } from 'lucide-react';
 import { useFootball } from '@/context/FootballContext';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { TacticalVideoPlayer } from '@/components/common/TacticalVideoPlayer';
 import { PitchCalibrationModal } from '@/components/common/PitchCalibrationModal';
+import { GoalLandmarkModal } from '@/components/common/GoalLandmarkModal';
 import { MatchStatsPanel } from '@/components/common/MatchStatsPanel';
 import {
   DetectionBox,
+  GoalEvent,
+  GoalLandmarkGoal,
   PossessionCarrier,
   PossessionEventItem,
   PossessionState,
@@ -38,6 +43,7 @@ import {
   analyzeVideoWithYOLO,
   checkYOLOStatus,
   getBackgroundJobStatus,
+  getGoalLandmarks,
   getSavedHomography,
   YOLOTimeline,
 } from '@/lib/yoloApi';
@@ -57,7 +63,12 @@ interface PossessionView {
   totalLosses: number;
   totalPasses: number;
   events: PossessionEventItem[];
+  /** Goals from the marked goal landmarks. */
+  goals: GoalEvent[];
+  score: { team_1: number; team_2: number };
 }
+
+const ZERO_SCORE = { team_1: 0, team_2: 0 };
 
 const EMPTY_TEAMS: TeamClusterInfo[] = [1, 2].map((id) => ({
   team_id: id as 1 | 2,
@@ -100,6 +111,8 @@ function summaryToView(
     totalLosses: summary.total_losses,
     totalPasses: summary.total_passes,
     events: summary.events || [],
+    goals: summary.goals?.goals || [],
+    score: summary.goals?.score || ZERO_SCORE,
   };
 }
 
@@ -135,14 +148,13 @@ export const AnalysisView: React.FC = () => {
     player: number;
     football: number;
     'football goal': number;
-    /** referee + assistant_referee. The model has no 'player with ball' class;
-     *  the carrier is worked out from the ball's position instead. */
-    officials: number;
+    /** best_5 labels the ball carrier directly (class 3). */
+    'player with ball': number;
   }>({
     player: 0,
     football: 0,
     'football goal': 0,
-    officials: 0,
+    'player with ball': 0,
   });
   const [inferenceLatency, setInferenceLatency] = useState<number>(36);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -155,6 +167,13 @@ export const AnalysisView: React.FC = () => {
   // Team grouping & ball possession
   const [livePossession, setLivePossession] = useState<PossessionState | null>(null);
   const [liveEvents, setLiveEvents] = useState<PossessionEventItem[]>([]);
+  const [liveGoals, setLiveGoals] = useState<GoalEvent[]>([]);
+
+  // Goal landmarks (optional): when marked, goals are detected from these goal
+  // mouths; otherwise the backend detects them from the model's goal boxes.
+  const videoBackendName = activeVideo.savedFilename || activeVideo.filename;
+  const [goalMarks, setGoalMarks] = useState<GoalLandmarkGoal[]>([]);
+  const [goalModal, setGoalModal] = useState<null | 'edit' | 'before-analysis'>(null);
   const [batchPossession, setBatchPossession] = useState<PossessionSummary | null>(null);
 
   // Check YOLO backend connectivity
@@ -186,6 +205,17 @@ export const AnalysisView: React.FC = () => {
     setBatchPossession(null);
   }, [activeVideo]);
 
+  // Load the goals marked for this video.
+  useEffect(() => {
+    let alive = true;
+    getGoalLandmarks(videoBackendName).then((data) => {
+      if (alive) setGoalMarks(data?.goals ?? []);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [videoBackendName]);
+
   // Callback when TacticalVideoPlayer detects a frame
   const handleDetectionsUpdate = useCallback(
     (
@@ -199,7 +229,7 @@ export const AnalysisView: React.FC = () => {
         player: counts['player'] ?? 0,
         football: counts['football'] ?? (counts['ball'] ?? 0),
         'football goal': counts['football goal'] ?? (counts['goal'] ?? 0),
-        officials: (counts['referee'] ?? 0) + (counts['assistant_referee'] ?? 0),
+        'player with ball': counts['player with ball'] ?? 0,
       });
       if (latencyMs) setInferenceLatency(latencyMs);
       if (possession) {
@@ -212,6 +242,10 @@ export const AnalysisView: React.FC = () => {
               : [...prev, event].slice(-MAX_LIVE_EVENTS)
           );
         }
+        const goal = possession.goal_event;
+        if (goal) {
+          setLiveGoals((prev) => (prev.some((g) => g.id === goal.id) ? prev : [...prev, goal]));
+        }
       }
     },
     []
@@ -220,6 +254,7 @@ export const AnalysisView: React.FC = () => {
   const handlePossessionReset = useCallback(() => {
     setLivePossession(null);
     setLiveEvents([]);
+    setLiveGoals([]);
   }, []);
 
   // One view model for Live, Batch (timeline) and 5s Chunked modes.
@@ -241,10 +276,23 @@ export const AnalysisView: React.FC = () => {
         totalLosses: livePossession.total_losses,
         totalPasses: livePossession.total_passes,
         events: usingBatch && batchPossession ? batchPossession.events : liveEvents,
+        goals: usingBatch && batchPossession ? batchPossession.goals?.goals || [] : liveGoals,
+        score:
+          usingBatch && batchPossession
+            ? batchPossession.goals?.score || ZERO_SCORE
+            : livePossession.score || ZERO_SCORE,
       };
     }
     return usingBatch && batchPossession ? summaryToView(batchPossession, 'Batch') : null;
-  }, [analysisMode, activeBackgroundJob, batchPossession, timelineData, livePossession, liveEvents]);
+  }, [
+    analysisMode,
+    activeBackgroundJob,
+    batchPossession,
+    timelineData,
+    livePossession,
+    liveEvents,
+    liveGoals,
+  ]);
 
   const lastPossessionEvent =
     possessionView && possessionView.events.length > 0
@@ -538,6 +586,8 @@ export const AnalysisView: React.FC = () => {
                 onDetectionsUpdate={handleDetectionsUpdate}
                 onPossessionReset={handlePossessionReset}
                 onPlayStateChange={setIsPlaying}
+                videoFilename={videoBackendName}
+                goalMarks={goalMarks}
               />
 
               {/* Real-time Detections Stream Table */}
@@ -862,18 +912,18 @@ export const AnalysisView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Match officials - detected so they are excluded from teams */}
+              {/* 4. Player with Ball - best_5 labels the ball carrier directly */}
               <div className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-[#3CB4FA] shadow-xs" />
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#059669] shadow-xs" />
                   <div>
-                    <span className="font-bold text-[#242424] block">Match Officials</span>
-                    <span className="text-[10px] text-[#858585]">referee + assistant_referee</span>
+                    <span className="font-bold text-[#242424] block">Player with Ball</span>
+                    <span className="text-[10px] text-[#858585]">Class 3: player with ball</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono font-black text-lg text-[#3CB4FA]">
-                    {liveClassCounts.officials}
+                  <span className="font-mono font-black text-lg text-[#059669]">
+                    {liveClassCounts['player with ball']}
                   </span>
                 </div>
               </div>
@@ -893,10 +943,11 @@ export const AnalysisView: React.FC = () => {
                     football: 0.3,
                     'football goal': 0.35,
                     player: 0.25,
-                    referee: 0.25,
-                    'assistant_referee': 0.25,
+                    'player with ball': 0.25,
                   });
-                  showToast('Reset to recommended thresholds (Goal 35%, Football 30%, Player 25%)');
+                  showToast(
+                    'Reset to recommended thresholds (Goal 35%, Football 30%, Player 25%, Player with Ball 25%)'
+                  );
                 }}
                 className="flex items-center gap-1 text-[11px] text-[#858585] hover:text-[#242424] font-medium cursor-pointer transition-colors"
                 title="Reset to recommended baseline"
@@ -995,16 +1046,16 @@ export const AnalysisView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Match officials */}
+              {/* 4. Player with Ball */}
               <div className="p-3 rounded-xl bg-white border border-[#E8E3D8] space-y-1.5 shadow-2xs">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#3CB4FA]" />
-                    <span className="font-bold text-[#242424]">Match Officials</span>
-                    <span className="text-[10px] text-[#858585]">referee</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#059669]" />
+                    <span className="font-bold text-[#242424]">Player with Ball</span>
+                    <span className="text-[10px] text-[#858585]">Class 3</span>
                   </div>
-                  <span className="font-mono font-bold text-xs text-[#3CB4FA] bg-[#3CB4FA]/10 px-2 py-0.5 rounded">
-                    {Math.round((classConfidences['referee'] ?? 0.25) * 100)}%
+                  <span className="font-mono font-bold text-xs text-[#059669] bg-[#059669]/10 px-2 py-0.5 rounded">
+                    {Math.round((classConfidences['player with ball'] ?? 0.25) * 100)}%
                   </span>
                 </div>
                 <input
@@ -1012,13 +1063,11 @@ export const AnalysisView: React.FC = () => {
                   min="0.05"
                   max="0.95"
                   step="0.05"
-                  value={classConfidences['referee'] ?? 0.25}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    updateClassConfidence('referee', v);
-                    updateClassConfidence('assistant_referee', v);
-                  }}
-                  className="w-full accent-[#3CB4FA] h-1.5 bg-[#E8E3D8] rounded-lg cursor-pointer"
+                  value={classConfidences['player with ball'] ?? 0.25}
+                  onChange={(e) =>
+                    updateClassConfidence('player with ball', parseFloat(e.target.value))
+                  }
+                  className="w-full accent-[#059669] h-1.5 bg-[#E8E3D8] rounded-lg cursor-pointer"
                 />
                 <div className="flex justify-between text-[10px] text-[#858585] font-mono">
                   <span>5% (Permissive)</span>
@@ -1225,7 +1274,37 @@ export const AnalysisView: React.FC = () => {
           continueLabel="Save & start analysis"
           onCalibrated={() => {
             setShowCalibration(false);
-            handleTriggerBackgroundAnnotation(true);
+            if (goalMarks.length === 0) {
+              // Offer goal marking before the analysis starts (optional).
+              setGoalModal('before-analysis');
+            } else {
+              handleTriggerBackgroundAnnotation(true);
+            }
+          }}
+        />
+      )}
+
+      {goalModal && (
+        <GoalLandmarkModal
+          video={activeVideo}
+          onClose={() => setGoalModal(null)}
+          continueLabel={goalModal === 'before-analysis' ? 'Save goals & start analysis' : 'Save goals'}
+          onSkip={
+            goalModal === 'before-analysis'
+              ? () => {
+                  setGoalModal(null);
+                  handleTriggerBackgroundAnnotation(true);
+                }
+              : undefined
+          }
+          onSaved={(data) => {
+            const startAfter = goalModal === 'before-analysis';
+            setGoalMarks(data.goals);
+            setGoalModal(null);
+            showToast(
+              `${data.goals.length} goal${data.goals.length === 1 ? '' : 's'} marked — goal detection will use your marks.`
+            );
+            if (startAfter) handleTriggerBackgroundAnnotation(true);
           }}
         />
       )}
@@ -1237,6 +1316,14 @@ export const AnalysisView: React.FC = () => {
             Team Grouping &amp; Ball Possession
           </span>
           <div className="flex-1 h-px bg-[#E8E3D8]" />
+          <button
+            onClick={() => setGoalModal('edit')}
+            className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] hover:bg-[#FDE68A] cursor-pointer flex items-center gap-1"
+            title="Optional: click the goal corners on a frame. Without marks, goals are detected automatically."
+          >
+            <Goal className="w-3 h-3" />
+            {goalMarks.length ? `Goals marked (${goalMarks.length}) · edit` : 'Mark goals'}
+          </button>
           {possessionView && (
             <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#262626] text-white">
               {possessionView.source}
@@ -1318,6 +1405,97 @@ export const AnalysisView: React.FC = () => {
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Goals (from the marked goal landmarks) */}
+              <div className="bg-[#FAF8F4] border border-[#E8E3D8] rounded-2xl p-4 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#242424] flex items-center gap-2">
+                    <Trophy className="w-4 h-4 text-[#D97706]" />
+                    Goals
+                  </h4>
+                  <div className="flex items-center gap-2 font-mono font-black text-lg text-[#242424]">
+                    {possessionView.teams.map((t, i) => (
+                      <React.Fragment key={t.team_id}>
+                        {i > 0 && <span className="text-[#858585]">–</span>}
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className="w-2.5 h-2.5 rounded-sm"
+                            style={{ backgroundColor: t.color_hex || '#A3A3A3' }}
+                          />
+                          {t.team_id === 1 ? possessionView.score.team_1 : possessionView.score.team_2}
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+                {/* Which goal detection mode is active (landmarks are optional) */}
+                <div className="text-[11px] text-[#858585] flex flex-wrap items-center gap-2">
+                  {goalMarks.length > 0 ? (
+                    <span>
+                      Using your {goalMarks.length} marked goal{goalMarks.length === 1 ? '' : 's'}.
+                    </span>
+                  ) : (
+                    <>
+                      <span>
+                        Goals are detected automatically from the model&apos;s goal detections. For a fixed
+                        camera, marking the goals is more accurate.
+                      </span>
+                      <button
+                        onClick={() => setGoalModal('edit')}
+                        className="px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] font-bold hover:bg-[#FDE68A] cursor-pointer"
+                      >
+                        Mark goals (optional)
+                      </button>
+                    </>
+                  )}
+                </div>
+                {possessionView.goals.length === 0 ? (
+                  <p className="text-[11px] text-[#858585]">
+                    No goals yet. A goal counts when the ball enters the goal through its mouth, its ground
+                    point is behind the goal line, and it stays in the net.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-[#E8E3D8] text-xs">
+                    {possessionView.goals.map((g) => {
+                      const team = possessionView.teams.find((t) => t.team_id === g.team);
+                      return (
+                        <div key={g.id} className="py-2 flex items-center justify-between gap-2">
+                          <span className="font-mono text-[11px] text-[#858585] w-14 shrink-0">
+                            {formatEventTime(g.timestamp)}
+                          </span>
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0 font-semibold text-[#242424]">
+                            <span
+                              className="w-2.5 h-2.5 rounded-sm shrink-0"
+                              style={{ backgroundColor: team?.color_hex || '#A3A3A3' }}
+                            />
+                            <span className="truncate">
+                              {g.team != null
+                                ? `${teamName(g.team)}${g.scorer != null ? ` #${g.scorer}` : ''}`
+                                : 'Scorer not identified'}
+                            </span>
+                            <span className="text-[10px] text-[#858585] font-normal truncate">
+                              · {g.goal_label}
+                            </span>
+                          </div>
+                          <span
+                            className="text-[10px] font-mono text-[#858585] whitespace-nowrap"
+                            title={
+                              g.confirmation === 'dwell'
+                                ? 'Confirmed: ball stayed in the net'
+                                : 'Confirmed: ball disappeared into the net'
+                            }
+                          >
+                            {Math.round(g.confidence * 100)}% conf
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap bg-[#FEF3C7] text-[#92400E]">
+                            {g.score.team_1}–{g.score.team_2}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Possession split bar */}

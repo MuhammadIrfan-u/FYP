@@ -107,6 +107,88 @@ export interface PossessionState {
   total_losses: number;
   total_passes: number;
   teams_ready: boolean;
+  /** Goal confirmed on this frame (from marked landmarks, or detected goal boxes). */
+  goal_event?: GoalEvent | null;
+  score?: TeamScore;
+  /** True whenever goal detection runs (with or without marked landmarks). */
+  goals_enabled?: boolean;
+  goal_detection_mode?: GoalDetectionMode;
+  /** How many goals the user marked (0 = automatic mode). */
+  goals_marked?: number;
+}
+
+/** "landmarks" = user-marked goals; "auto" = the model's "football goal" boxes. */
+export type GoalDetectionMode = 'landmarks' | 'auto' | 'off';
+
+/* ---------- Goal landmarks & goal detection ---------- */
+
+export type GoalPointId =
+  | 'post_left_bottom'
+  | 'post_right_bottom'
+  | 'post_right_top'
+  | 'post_left_top';
+
+export interface TeamScore {
+  team_1: number;
+  team_2: number;
+}
+
+/** One marked goal mouth; points are [x, y] in percent of the frame. */
+export interface GoalLandmarkGoal {
+  id: string;
+  side: 'left' | 'right' | null;
+  label: string;
+  points: Record<GoalPointId, [number, number]>;
+}
+
+export interface GoalLandmarksData {
+  success: boolean;
+  video_filename: string;
+  image_width: number;
+  image_height: number;
+  goals: GoalLandmarkGoal[];
+}
+
+/** Goal from backend/app/services/goal_detection.py. */
+export interface GoalEvent {
+  id: string;
+  type: 'goal';
+  /** Video time the ball first entered the goal. */
+  timestamp: number | null;
+  confirmed_at: number | null;
+  frame_index: number | null;
+  team: number | null;
+  scorer: number | null;
+  attribution: 'last_carrier' | 'unknown';
+  goal_id: string;
+  goal_label: string;
+  goal_side: 'left' | 'right' | null;
+  detection_mode?: 'landmarks' | 'auto';
+  /** Detected goal box [x, y, w, h] in percent (auto mode only). */
+  goal_box?: number[] | null;
+  /** Half of the screen the goal is on. */
+  screen_side?: 'left' | 'right';
+  confirmation: 'dwell' | 'hidden_in_net';
+  inside_samples: number;
+  inside_sec: number;
+  confidence: number;
+  score: TeamScore;
+  description: string;
+}
+
+export interface GoalSummary {
+  enabled: boolean;
+  goal_detection_mode?: GoalDetectionMode;
+  goals_marked?: number;
+  goal_mouths: GoalLandmarkGoal[];
+  score: TeamScore;
+  total_goals: number;
+  unattributed_goals: number;
+  saves: number;
+  over_bar: number;
+  /** Ball inside the goal on screen but in front of it (rejected). */
+  in_front_rejections: number;
+  goals: GoalEvent[];
 }
 
 /** Cumulative possession for a whole clip / session / background job. */
@@ -124,6 +206,7 @@ export interface PossessionSummary {
   current_carrier: PossessionCarrier | null;
   teams_ready: boolean;
   active_tracks: number;
+  goals?: GoalSummary;
 }
 
 /* ---------- Pitch calibration (homography view) ---------- */

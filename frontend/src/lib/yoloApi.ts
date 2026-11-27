@@ -7,6 +7,8 @@ import type {
   CalibrationResult,
   DetectionBox,
   DetectionClass,
+  GoalLandmarksData,
+  GoalPointId,
   MatchStats,
   MergeJob,
   PitchLandmark,
@@ -153,6 +155,8 @@ export interface FrameSessionOptions {
   timestamp?: number;
   /** Clear the session's tracker before processing this frame. */
   resetSession?: boolean;
+  /** Backend filename of the video, so its marked goal landmarks are used. */
+  videoFilename?: string;
 }
 
 export async function analyzeFrameWithYOLO(
@@ -174,6 +178,9 @@ export async function analyzeFrameWithYOLO(
   }
   if (session?.timestamp !== undefined && Number.isFinite(session.timestamp)) {
     bodyPayload.timestamp = session.timestamp;
+  }
+  if (session?.videoFilename) {
+    bodyPayload.video_filename = session.videoFilename;
   }
 
   const res = await fetch(`${YOLO_API_BASE}/api/analyze-frame`, {
@@ -335,6 +342,9 @@ export interface BackgroundAnnotationJob {
   possession_summary?: PossessionSummary | null;
   /** True when a landmark (homography) calibration was applied. */
   calibrated?: boolean;
+  /** Goals the user marked for this video (0 = goals detected automatically). */
+  goals_marked?: number;
+  goal_detection_mode?: 'landmarks' | 'auto';
   match_stats?: MatchStats | null;
   /** Running total of passes across completed 5s chunks (no double counting). */
   total_passes?: number;
@@ -548,6 +558,73 @@ export async function getSavedHomography(videoFilename: string): Promise<Calibra
   } catch {
     return null;
   }
+}
+
+/* ---------- Goal landmarks (goal detection uses only these) ---------- */
+
+export async function getGoalLandmarkPoints(): Promise<{
+  points: { id: GoalPointId; label: string }[];
+  max_goals: number;
+}> {
+  const res = await fetch(`${YOLO_API_BASE}/api/goal-landmarks/points`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Goal landmark points failed (${res.status})`);
+  return await res.json();
+}
+
+export async function getGoalLandmarks(videoFilename: string): Promise<GoalLandmarksData | null> {
+  try {
+    const res = await fetch(
+      `${YOLO_API_BASE}/api/goal-landmarks?video_filename=${encodeURIComponent(videoFilename)}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function saveGoalLandmarks(payload: {
+  videoFilename: string;
+  imageWidth: number;
+  imageHeight: number;
+  goals: {
+    id: string;
+    side: 'left' | 'right' | null;
+    label: string;
+    /** Clicked points in pixels of the frame image. */
+    points: { id: GoalPointId; x: number; y: number }[];
+  }[];
+}): Promise<GoalLandmarksData> {
+  const res = await fetch(`${YOLO_API_BASE}/api/goal-landmarks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      video_filename: payload.videoFilename,
+      image_width: payload.imageWidth,
+      image_height: payload.imageHeight,
+      goals: payload.goals,
+    }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json()).detail;
+    } catch {
+      detail = await res.text();
+    }
+    throw new Error(detail || `Saving goal landmarks failed (${res.status})`);
+  }
+  return await res.json();
+}
+
+export async function deleteGoalLandmarks(videoFilename: string): Promise<void> {
+  await fetch(
+    `${YOLO_API_BASE}/api/goal-landmarks?video_filename=${encodeURIComponent(videoFilename)}`,
+    { method: 'DELETE' }
+  );
 }
 
 export interface SyncVideosPayload {

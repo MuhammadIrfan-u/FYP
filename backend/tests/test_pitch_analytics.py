@@ -259,22 +259,63 @@ def test_carrier_flicker_and_short_reid_are_not_passes():
     assert a.summary()["event_counts"].get("pass") is None
 
 
-def test_goal_detected_and_credited_to_attacking_team():
+def _run_with_goal(a, frames, goal_at, goal_event, dt=0.2):
+    """Like ``_run`` but passes the landmark goal event on sample ``goal_at``."""
+    for i, dets in enumerate(frames):
+        a.process(
+            dets,
+            i * dt,
+            i,
+            IMG_W,
+            IMG_H,
+            goal_event=goal_event if i == goal_at else None,
+        )
+
+
+LANDMARK_GOAL = {"type": "goal", "goal_side": "right", "goal_id": "goal_r", "team": 1}
+
+
+def test_landmark_goal_credited_to_attacking_team():
     a = MatchAnalytics(_mapper())
     # Team 1 lives on the left (mean x ~32), team 2 on the right (~80) -> team 2
-    # defends the right goal. #2 (team 1) dribbles in and shoots into the right goal.
+    # defends the right goal. #2 (team 1) dribbles in and shoots into the right goal;
+    # the goal-landmark detector confirms it once the ball is in the net.
     frames = [_frame((45.3, 40)) for _ in range(6)]
     frames += [_frame((100.3, 34), moves={2: (100.0, 34)}) for _ in range(3)]
     frames += [_frame((106.0, 34.5), moves={2: (100.0, 34)}) for _ in range(3)]
-    _run(a, frames)
+    _run_with_goal(a, frames, goal_at=10, goal_event=LANDMARK_GOAL)
     s = a.summary()
     assert s["score"] == {"team_1": 1, "team_2": 0}
     goal = s["goals"][0]
     assert goal["scorer"] == 2 and goal["team"] == 1 and goal["own_goal"] is False
-    assert goal["goal_side"] == "right"
-    # Cooldown: still in the net next samples -> no second goal
+    assert goal["goal_side"] == "right" and goal["goal_id"] == "goal_r"
+    # Ball still in the net afterwards: no goal kick, no second goal.
     _run(a, [_frame((106.0, 34.5))] * 3)
-    assert a.summary()["score"]["team_1"] == 1
+    s = a.summary()
+    assert s["score"]["team_1"] == 1
+    assert not [e for e in s["events"] if e["type"] == "out"]
+
+
+def test_ball_in_net_without_landmark_goal_is_not_a_goal():
+    """Goals come only from the goal landmarks; the homography alone never scores."""
+    a = MatchAnalytics(_mapper())
+    frames = [_frame((45.3, 40)) for _ in range(6)]
+    frames += [_frame((106.0, 34.5), moves={2: (100.0, 34)}) for _ in range(5)]
+    _run(a, frames)
+    s = a.summary()
+    assert s["score"] == {"team_1": 0, "team_2": 0}
+    assert not [e for e in s["events"] if e["type"] == "out"]
+
+
+def test_landmark_goal_own_goal():
+    a = MatchAnalytics(_mapper())
+    # #12 (team 2, defends the right goal) has the ball and it goes into the right goal.
+    frames = [_frame((80.3, 40)) for _ in range(6)]
+    frames += [_frame((106.0, 34.5)) for _ in range(2)]
+    _run_with_goal(a, frames, goal_at=7, goal_event=LANDMARK_GOAL)
+    goal = a.summary()["goals"][0]
+    assert goal["own_goal"] is True
+    assert goal["team"] == 1  # credited to the attacking team
 
 
 def test_ball_wide_of_post_is_out_not_goal():
